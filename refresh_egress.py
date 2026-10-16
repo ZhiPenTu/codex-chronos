@@ -35,7 +35,8 @@ DIR_NAME = 'codex-chronos'
 URL = 'https://ipinfo.io/json'
 
 # Well-known local HTTP proxy ports (Clash/mihomo/Clash Verge/V2Ray/Surge).
-LOCAL_PROXY_PORTS = (7890, 7897, 7891, 1087, 8118, 8080)
+# Surge for Mac listens on 6152 (HTTP); its 6153 is SOCKS-only and excluded.
+LOCAL_PROXY_PORTS = (7890, 7897, 7891, 1087, 8118, 8080, 6152)
 
 
 def data_dir():
