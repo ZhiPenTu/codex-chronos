@@ -4,6 +4,7 @@
 // Build the 503 body for a failed egress refresh. helper_error is NULL when
 // the helper could not be reached at all, or a short reason when the helper
 // itself answered ERR (surfaced from refresh_egress.py).
+#ifdef _WIN32
 static void refresh_failure(cliproxy_buffer *out, const char *path,
                             const char *helper_error) {
   char safe_path[CODEX_TZ_PATH_CAP*2];
@@ -22,8 +23,10 @@ static void refresh_failure(cliproxy_buffer *out, const char *path,
   }
   http_response(out,503,"application/json",reason);
 }
+#endif // _WIN32
 
 // Extract a short helper error reason from an "ERR <reason>\n" reply.
+#ifdef _WIN32
 static const char *helper_error_from(const char *response, char *buf, size_t cap) {
   if (!response || strncmp(response,"ERR",3)!=0) return NULL;
   size_t w=0;
@@ -33,6 +36,7 @@ static const char *helper_error_from(const char *response, char *buf, size_t cap
   buf[w]=0;
   return w ? buf : "未知错误";
 }
+#endif // _WIN32
 
 #ifdef _WIN32
 // Windows' standard Python distribution has no AF_UNIX. Use a private,
@@ -127,18 +131,44 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   char response[256]={0};
   ssize_t got=sent?recv(fd,response,sizeof(response)-1,0):-1;
   close(fd);
-  if(got<3 || memcmp(response,"OK\n",3)!=0) {
-    char helper_error[512]="";
-    const char *err=helper_error_from(response,helper_error,sizeof(helper_error));
-    refresh_failure(out,path,err);return;
+  if(got>=3 && memcmp(response,"OK\n",3)==0) {
+    sync_state fresh;
+    if(!load_state(&fresh)) {
+      http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"出口检测后状态仍不可用\"}");return;
+    }
+    char json[320];
+    snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
+      fresh.zone,fresh.ip,fresh.offset);
+    http_response(out,200,"application/json",json);
+    return;
   }
-  sync_state fresh;
-  if(!load_state(&fresh)) {
+  // No refresh daemon reachable (the common desktop case): run the helper
+  // ourselves, right now, and answer from the refreshed state file.
+  int ran=tz_refresh_once(45);
+  if(ran==0) {
+    sync_state fresh;
+    if(load_state(&fresh)) {
+      char json[320];
+      snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
+        fresh.zone,fresh.ip,fresh.offset);
+      http_response(out,200,"application/json",json);
+      return;
+    }
     http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"出口检测后状态仍不可用\"}");return;
   }
-  char json[320];
-  snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
-    fresh.zone,fresh.ip,fresh.offset);
-  http_response(out,200,"application/json",json);
+  char log_escaped[CODEX_TZ_PATH_CAP*2],dir_escaped[CODEX_TZ_PATH_CAP*2];
+  tz_json_escape(log_escaped,sizeof(log_escaped),tz_join("helper.log"));
+  tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
+  char reason[CODEX_TZ_PATH_CAP*6];
+  if(ran==1) {
+    snprintf(reason,sizeof(reason),
+      "{\"ok\":false,\"reason\":\"出口检测失败：刷新助手 refresh_egress.py 运行失败，请查看日志 %s；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
+      log_escaped);
+  } else {
+    snprintf(reason,sizeof(reason),
+      "{\"ok\":false,\"reason\":\"出口检测失败：未找到刷新助手 refresh_egress.py（已搜索 CODEX_TZ_HELPER、数据目录与常见安装位置）。请将其放入数据目录 %s，或用 CODEX_TZ_HELPER 指定路径\"}",
+      dir_escaped);
+  }
+  http_response(out,503,"application/json",reason);
 }
 #endif

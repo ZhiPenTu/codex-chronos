@@ -23,7 +23,7 @@ endif
 all: $(LIB)
 dashboard_bundle.h: dashboard.html embed_ui.py
 	$(PYTHON) embed_ui.py
-$(LIB): plugin.c settings.inc events.inc stats.inc refresh_bridge.inc failures.inc timezone_normalize.inc model_monitor.inc paths.inc platform_compat.h dashboard_bundle.h
+$(LIB): plugin.c settings.inc events.inc stats.inc refresh_bridge.inc failures.inc timezone_normalize.inc model_monitor.inc paths.inc spawn_refresh.inc platform_compat.h dashboard_bundle.h
 ifdef DARWIN_SDKS
 	@ok=0; \
 	if $(CC) $(CFLAGS) -o $@ $< $(LDFLAGS); then ok=1; fi; \

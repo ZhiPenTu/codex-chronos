@@ -16,6 +16,28 @@ from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parent
 
+# Deterministic stand-in for refresh_egress.py: no network, no daemon.
+# Counts every run in $TZ_TEST_COUNTER and (when TZ_TEST_WRITE_STATE=1)
+# writes a fixed state file, so on-demand spawn behaviour is testable.
+FAKE_HELPER = '''#!/usr/bin/env python3
+import os, pathlib
+counter = os.environ.get('TZ_TEST_COUNTER')
+if counter:
+    with open(counter, 'a') as fh:
+        fh.write('run\\n')
+if os.environ.get('TZ_TEST_WRITE_STATE') == '1':
+    state = pathlib.Path(os.environ['CODEX_TZ_STATE_FILE'])
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text('Pacific/Honolulu|2026-10-16|HST|-10:00\\n1.2.3.4\\n')
+'''
+
+# Always fails: exercises the "helper ran but failed" error path.
+FAILING_HELPER = '''#!/usr/bin/env python3
+import sys
+print('simulated helper failure', file=sys.stderr)
+sys.exit(1)
+'''
+
 class Buffer(ct.Structure):
     _fields_ = [('ptr', ct.c_void_p), ('len', ct.c_size_t)]
 
@@ -26,7 +48,30 @@ Shutdown = ct.CFUNCTYPE(None)
 class API(ct.Structure):
     _fields_ = [('abi_version', ct.c_uint32), ('call', Call), ('free_buffer', Free), ('shutdown', Shutdown)]
 
-LIB = ct.CDLL(str(ROOT / ('codex-chronos.dll' if sys.platform == 'win32' else 'codex-chronos.dylib' if sys.platform == 'darwin' else 'codex-chronos.so')))
+def bind_library(lib_path):
+    """Load a plugin instance and return (api, call) bound to it."""
+    lib = ct.CDLL(str(lib_path))
+    lib.cliproxy_plugin_init.argtypes = [ct.c_void_p, ct.POINTER(API)]
+    lib.cliproxy_plugin_init.restype = ct.c_int
+    api = API()
+    assert lib.cliproxy_plugin_init(None, ct.byref(api)) == 0
+    assert api.abi_version == 1
+
+    def call(method, payload=None):
+        encoded = b'' if payload is None else json.dumps(payload, ensure_ascii=False).encode()
+        mem = ct.create_string_buffer(encoded)
+        response = Buffer()
+        status = api.call(method.encode(), mem, len(encoded), ct.byref(response))
+        assert status == 0, status
+        try:
+            return json.loads(ct.string_at(response.ptr, response.len))
+        finally:
+            api.free_buffer(response.ptr, response.len)
+
+    return api, call
+
+LIB_PATH = ROOT / ('codex-chronos.dll' if sys.platform == 'win32' else 'codex-chronos.dylib' if sys.platform == 'darwin' else 'codex-chronos.so')
+LIB = ct.CDLL(str(LIB_PATH))
 LIB.cliproxy_plugin_init.argtypes = [ct.c_void_p, ct.POINTER(API)]
 LIB.cliproxy_plugin_init.restype = ct.c_int
 API_OBJ = API()
@@ -70,15 +115,25 @@ class TestTimezonePlugin(unittest.TestCase):
         os.environ['CODEX_TZ_REFRESH_SOCKET'] = str(cls.socketpath)
         cls.failfile = pathlib.Path(cls.temp.name) / 'timezone.failures'
         os.environ['CODEX_TZ_FAILURE_FILE'] = str(cls.failfile)
+        # Deterministic on-demand refresh: a local fake helper, no network.
+        cls.helper = pathlib.Path(cls.temp.name) / 'fake_helper.py'
+        cls.helper.write_text(FAKE_HELPER)
+        os.environ['CODEX_TZ_HELPER'] = str(cls.helper)
+        os.environ['CODEX_TZ_PYTHON'] = sys.executable
+        cls.counter = pathlib.Path(cls.temp.name) / 'helper.runs'
+        os.environ['TZ_TEST_COUNTER'] = str(cls.counter)
+        os.environ['TZ_TEST_WRITE_STATE'] = '1'
+        # Background self-heal is covered by TestOnDemandRefresh with fresh
+        # plugin instances; disable it here to keep this class fork-free.
+        os.environ['CODEX_TZ_REFRESH_INTERVAL'] = '0'
 
     @classmethod
     def tearDownClass(cls):
-        os.environ.pop('CODEX_TZ_STATE_FILE', None)
-        os.environ.pop('CODEX_TZ_CONFIG_FILE', None)
-        os.environ.pop('CODEX_TZ_LOG_FILE', None)
-        os.environ.pop('CODEX_TZ_STATS_FILE', None)
-        os.environ.pop('CODEX_TZ_REFRESH_SOCKET', None)
-        os.environ.pop('CODEX_TZ_FAILURE_FILE', None)
+        for key in ('CODEX_TZ_STATE_FILE','CODEX_TZ_CONFIG_FILE','CODEX_TZ_LOG_FILE',
+                    'CODEX_TZ_STATS_FILE','CODEX_TZ_REFRESH_SOCKET','CODEX_TZ_FAILURE_FILE',
+                    'CODEX_TZ_HELPER','CODEX_TZ_PYTHON','TZ_TEST_COUNTER',
+                    'TZ_TEST_WRITE_STATE','CODEX_TZ_REFRESH_INTERVAL'):
+            os.environ.pop(key, None)
         cls.temp.cleanup()
 
     def test_register(self):
@@ -136,9 +191,14 @@ class TestTimezonePlugin(unittest.TestCase):
     def test_manual_egress_refresh_invokes_helper_and_reads_new_state(self):
         before=self.path.read_text()
         try:
+            # No daemon listening: the plugin must run the helper itself
+            # (on-demand spawn) and answer from the refreshed state file.
             code,result=self._management('egress/refresh','POST')
-            self.assertEqual(code,503)
-            self.assertFalse(result['ok'])
+            self.assertEqual(code,200)
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['timezone'],'Pacific/Honolulu')
+            self.assertEqual(result['ip'],'1.2.3.4')
+            self.assertEqual(self.counter.read_text().count('run'),1)
             if os.name == 'nt':
                 request=pathlib.Path(str(self.socketpath)+'.request')
                 ready=pathlib.Path(str(self.socketpath)+'.ready')
@@ -161,6 +221,7 @@ class TestTimezonePlugin(unittest.TestCase):
                     ready.unlink(missing_ok=True)
                     request.unlink(missing_ok=True)
             else:
+                # Daemon reachable: the socket path still wins and is used.
                 with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as server:
                     server.bind(str(self.socketpath))
                     server.listen(1)
@@ -177,6 +238,8 @@ class TestTimezonePlugin(unittest.TestCase):
             self.assertEqual(code,200)
             self.assertEqual(result['timezone'],'America/New_York')
             self.assertEqual(result['ip'],'198.51.100.9')
+            # The daemon answered, so no second on-demand spawn happened.
+            self.assertEqual(self.counter.read_text().count('run'),1)
         finally:
             self.path.write_text(before)
             self.socketpath.unlink(missing_ok=True)
@@ -535,6 +598,99 @@ class TestTimezonePlugin(unittest.TestCase):
         invoke({'input':[]})
         self.assertEqual(self._management('logs')[1]['events'][0]['timezone_before'],'unknown')
 
+class TestOnDemandRefresh(unittest.TestCase):
+    """No refresh daemon installed: the plugin must refresh state itself.
+
+    These cases exercise spawn_refresh.inc. They share one loaded library
+    (dlopen caches the handle), so each case avoids depending on the
+    per-process rate-limit timestamp left behind by the others.
+    """
+
+    KEYS = ('CODEX_TZ_STATE_FILE','CODEX_TZ_DATA_DIR','CODEX_TZ_HELPER',
+            'CODEX_TZ_PYTHON','TZ_TEST_COUNTER','TZ_TEST_WRITE_STATE',
+            'CODEX_TZ_REFRESH_INTERVAL','CODEX_TZ_REFRESH_SOCKET',
+            'CODEX_TZ_LOG_FILE','CODEX_TZ_CONFIG_FILE','CODEX_TZ_STATS_FILE',
+            'CODEX_TZ_FAILURE_FILE')
+
+    def setUp(self):
+        self.saved = {k: os.environ.pop(k, None) for k in self.KEYS}
+        self.temp = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.temp.name)
+        data = base / 'data'
+        self.state = data / 'codex-chronos.state'
+        os.environ['CODEX_TZ_DATA_DIR'] = str(data)
+        os.environ['CODEX_TZ_STATE_FILE'] = str(self.state)
+        helper = base / 'fake_helper.py'
+        helper.write_text(FAKE_HELPER)
+        os.environ['CODEX_TZ_HELPER'] = str(helper)
+        os.environ['CODEX_TZ_PYTHON'] = sys.executable
+        self.counter = base / 'helper.runs'
+        os.environ['TZ_TEST_COUNTER'] = str(self.counter)
+        os.environ['TZ_TEST_WRITE_STATE'] = '1'
+        os.environ['CODEX_TZ_REFRESH_INTERVAL'] = '60'
+        self.api, self.call = bind_library(LIB_PATH)
+
+    def tearDown(self):
+        for key, value in self.saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self.temp.cleanup()
+
+    def _management(self, path, method='GET'):
+        request = {'Path': f'/v0/management/plugins/codex-chronos/{path}',
+                   'Method': method}
+        result = self.call('management.handle', request)['result']
+        return result['StatusCode'], json.loads(base64.b64decode(result['Body']))
+
+    def _runs(self):
+        try:
+            return self.counter.read_text().count('run')
+        except OSError:
+            return 0
+
+    def _wait_for_run(self, timeout=10):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._runs() >= 1:
+                return True
+            time.sleep(0.05)
+        return self._runs() >= 1
+
+    def test_background_self_heals_missing_state(self):
+        # State file absent: status must trigger a background refresh that
+        # recreates it, with no daemon running anywhere.
+        code, status = self._management('status')
+        self.assertEqual(code, 200)
+        self.assertFalse(status['available'])
+        self.assertTrue(self._wait_for_run(),
+                        'background refresh helper was never spawned')
+        self.assertTrue(self.state.is_file())
+        self.assertIn('Pacific/Honolulu', self.state.read_text())
+        # Rate limited: further status polls must not spawn more helpers.
+        self._management('status')
+        self._management('status')
+        time.sleep(1.0)
+        self.assertEqual(self._runs(), 1)
+
+    def test_fresh_state_never_forks(self):
+        self.state.parent.mkdir(parents=True, exist_ok=True)
+        self.state.write_text('Europe/Berlin|2026-10-16|CET|+01:00\n9.9.9.9\n')
+        code, status = self._management('status')
+        self.assertEqual(code, 200)
+        self.assertTrue(status['available'])
+        time.sleep(1.0)
+        self.assertEqual(self._runs(), 0)
+
+    def test_interval_zero_disables_self_heal(self):
+        os.environ['CODEX_TZ_REFRESH_INTERVAL'] = '0'
+        code, status = self._management('status')
+        self.assertEqual(code, 200)
+        self.assertFalse(status['available'])
+        time.sleep(1.0)
+        self.assertEqual(self._runs(), 0)
+
 class TestDesktopFallbackPaths(unittest.TestCase):
     """Non-container runs must fall back to a per-user data directory."""
 
@@ -558,11 +714,13 @@ class TestDesktopFallbackPaths(unittest.TestCase):
         keys = ('CODEX_TZ_STATE_FILE','CODEX_TZ_CONFIG_FILE','CODEX_TZ_LOG_FILE',
                 'CODEX_TZ_STATS_FILE','CODEX_TZ_FAILURE_FILE','CODEX_TZ_REFRESH_SOCKET',
                 'CODEX_TZ_DATA_DIR','HOME','XDG_DATA_HOME','USERPROFILE',
-                'LOCALAPPDATA','APPDATA')
+                'LOCALAPPDATA','APPDATA','CODEX_TZ_HELPER','CODEX_TZ_PYTHON',
+                'TZ_TEST_COUNTER','TZ_TEST_WRITE_STATE','CODEX_TZ_REFRESH_INTERVAL')
         self.saved = {k: os.environ.pop(k, None) for k in keys}
         os.environ['HOME'] = str(self.home)
         os.environ['USERPROFILE'] = str(self.home)
         os.environ['CODEX_TZ_STATE_FILE'] = str(self.state)
+        os.environ['CODEX_TZ_PYTHON'] = sys.executable
         if os.name == 'nt':
             os.environ['LOCALAPPDATA'] = str(self.home / 'AppData' / 'Local')
             os.environ['APPDATA'] = str(self.home / 'AppData' / 'Roaming')
@@ -643,15 +801,24 @@ class TestDesktopFallbackPaths(unittest.TestCase):
         self.assertEqual(status['refresh_socket'],
                          str(self._expected_dir() / 'codex-chronos-refresh.sock'))
 
-    def test_refresh_failure_names_socket_path(self):
+    def test_refresh_failure_reports_helper_log_path(self):
         if self._container:
             self.skipTest('container data directory present')
-        code, result = self._management('egress/refresh', 'POST')
+        failing = pathlib.Path(self.temp.name) / 'failing_helper.py'
+        failing.write_text(FAILING_HELPER)
+        os.environ['CODEX_TZ_HELPER'] = str(failing)
+        try:
+            code, result = self._management('egress/refresh', 'POST')
+        finally:
+            os.environ.pop('CODEX_TZ_HELPER', None)
         self.assertEqual(code, 503)
         self.assertFalse(result['ok'])
-        self.assertIn('codex-chronos-refresh.sock', result['reason'])
+        # The message must point at the helper log, not at a container-only
+        # socket or a mihomo-specific diagnosis.
+        self.assertIn('helper.log', result['reason'])
         self.assertIn('refresh_egress.py', result['reason'])
         self.assertNotIn('Mihomo', result['reason'])
+        self.assertNotIn('.sock', result['reason'])
 
 
 if __name__ == '__main__':

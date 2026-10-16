@@ -129,7 +129,7 @@ def refresh():
     proxy = resolve_proxy()
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({'https': proxy} if proxy else {}))
-    with opener.open(urllib.request.Request(URL, headers={'User-Agent': 'codex-chronos/0.6.0'}),
+    with opener.open(urllib.request.Request(URL, headers={'User-Agent': 'codex-chronos/0.7.0'}),
                      timeout=12) as resp:
         data = json.load(resp)
     ip = str(ipaddress.ip_address(data['ip']))

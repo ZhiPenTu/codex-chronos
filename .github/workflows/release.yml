@@ -61,7 +61,7 @@ jobs:
       - name: Test Mihomo egress helper
         run: python test_egress.py
       - name: Assemble CPA-compatible plugin ZIP
-        run: python package_release.py 0.6.0 ${{ matrix.platform }}
+        run: python package_release.py 0.7.0 ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.platform }}
@@ -82,7 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=0.6.0
+          version=0.7.0
           test "${GITHUB_REF_NAME}" = "v${version}"
           cd dist
           for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64; do

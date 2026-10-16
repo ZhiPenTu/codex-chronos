@@ -20,15 +20,12 @@
 
 ## 桌面（非容器）快速上手
 
-适合 EasyCLIProxyAPI 等桌面客户端，或任何直接在 macOS / Linux / Windows 上运行 CPA 的场景。**无需 Docker，无需 mihomo 容器。**
+适合 EasyCLIProxyAPI 等桌面客户端，或任何直接在 macOS / Linux / Windows 上运行 CPA 的场景。**无需 Docker，无需 mihomo 容器，也不需要常驻辅助进程。**
 
 ```bash
 git clone https://github.com/ZhiPenTu/codex-chronos.git
 cd codex-chronos
 make                      # 生成 codex-chronos.dylib / .so / .dll
-
-# 常驻辅助服务：响应面板「获取」，并每 15 分钟自动刷新出口时区
-python3 refresh_egress.py --serve
 ```
 
 把编译出的动态库放进 CPA 的插件目录（桌面客户端一般在「插件」页安装，或放入 `plugins/` 目录），其余全部自动：
@@ -44,9 +41,17 @@ python3 refresh_egress.py --serve
 
   可用环境变量 `CODEX_TZ_DATA_DIR` 或 CPA 插件配置项 `data_dir` 覆盖；面板「数据目录」一行会显示实际生效路径。
 
-- **出口代理自动探测**：`CODEX_TZ_PROXY` 环境变量 > `HTTPS_PROXY`/`https_proxy` > mihomo 容器（docker inspect）> 本机常见代理端口（7890 / 7897 / 7891 / 1087 / 8118 / 8080）> 直连。代理装在 macOS 上（Clash Verge / ClashX / mihomo 等）即自动识别，无需任何配置。
+- **出口代理自动探测**：`CODEX_TZ_PROXY` 环境变量 > `HTTPS_PROXY`/`https_proxy` > mihomo 容器（docker inspect）> 本机常见代理端口（7890 / 7897 / 7891 / 1087 / 8118 / 8080 / 6152）> 直连。代理装在 macOS 上（Clash Verge / ClashX / Surge / mihomo 等）即自动识别，无需任何配置。
 
-辅助服务保持运行时，面板显示「运行中」；停止服务后时区状态最长 2 小时内仍然有效（fail-open），之后自动跳过改写。
+### 刷新机制（v0.7.0 起无需守护进程）
+
+插件有三层刷新保障，按优先级自动选择：
+
+1. **面板「获取」按钮**：优先连接刷新 Socket（有 `refresh_egress.py --serve` 在跑时）；连不上时**插件自行拉起助手跑一次刷新**并直接返回结果——桌面零配置可用的关键。
+2. **请求路径自愈**：状态文件缺失或超过 `CODEX_TZ_REFRESH_INTERVAL`（默认 900 秒）未更新时，插件会在后台悄然刷新一次（双 fork 防僵尸、按间隔限速），随后的请求即可拿到时区。
+3. **常驻服务（可选）**：`python3 refresh_egress.py --serve` 常驻时，Socket 通道响应更快，且自带周期刷新。不运行时上述两层完全兜底，**时区状态最长 2 小时内仍然有效（fail-open），不会阻断任何请求**。
+
+助手脚本查找顺序：`CODEX_TZ_HELPER` 环境变量 > 数据目录 > 插件库所在目录 > EasyCLIProxyAPI 应用数据目录 > `~/.codex-chronos/` > `/usr/local/lib/codex-chronos/`。解释器查找：`CODEX_TZ_PYTHON` > `/usr/bin/python3` > PATH。
 
 ## 从 CPA 插件商店安装
 
@@ -80,7 +85,7 @@ America/Los_Angeles|2026-10-12|PDT|-07:00
 66.92.223.4
 ```
 
-辅助服务所在主机需有 Python 3.9+（含 `zoneinfo` / Windows 的 `tzdata` 包）、可访问代理出口。除预置的 Linux Docker 探测模式外，macOS / Windows 建议显式设置 `CODEX_TZ_PROXY`，以确保与 CPA 上游出口一致。推荐通过环境变量显式配置路径和代理：
+辅助服务所在主机需有 Python 3.9+（含 `zoneinfo` / Windows 的 `tzdata` 包）、可访问代理出口。macOS / Windows 桌面使用时会自动探测本机常见代理端口，通常无需设置 `CODEX_TZ_PROXY`；端口特殊或想强制直连时再显式配置：
 
 ```bash
 export CODEX_TZ_STATE=/你的共享数据目录/codex-chronos.state
@@ -96,7 +101,7 @@ python3 refresh_egress.py --serve
 
 其中 `CODEX_TZ_PROXY` 必须指向 **Codex 实际使用的同一个出口代理**；请勿让检测脚本走不同 IP。未设置时按「桌面快速上手」中的顺序自动探测；设为 `direct`（或 `none`）可强制直连。容器内若按开发环境部署，脚本会尝试定位 `cpa-proxy-net` 上的 `mihomo` 容器。宿主机的状态文件与 Unix Socket 需映射到 CPA 容器的 `/CLIProxyAPI/data/` 下；容器中 Socket 默认路径是 `/CLIProxyAPI/data/codex-chronos-refresh.sock`。如需自定义，设置容器环境变量 `CODEX_TZ_STATE_FILE` / `CODEX_TZ_REFRESH_SOCKET`。
 
-手动刷新依赖 Unix Socket 辅助服务并不是安装插件的必要条件；如果使用计划任务定期写入状态文件，自动改写仍然可用。建议状态文件刷新间隔不超过 30 分钟，插件对超过约 2 小时的状态会视为过期。`--serve` 模式自带周期刷新，桌面使用无需再配 cron。
+手动刷新**不依赖**常驻辅助服务：没有 `--serve` 时，插件会自行拉起 `refresh_egress.py` 跑一次性刷新（v0.7.0 起），请求路径也会在状态过期时后台自愈刷新。计划任务定期写状态文件的方式同样可用。建议状态文件刷新间隔不超过 30 分钟，插件对超过约 2 小时的状态会视为过期。`--serve` 模式自带周期刷新，桌面使用无需再配 cron。
 
 ### 环境变量一览
 
@@ -110,7 +115,9 @@ python3 refresh_egress.py --serve
 | `CODEX_TZ_STATS_FILE` | 插件 | 统计文件路径 |
 | `CODEX_TZ_FAILURE_FILE` | 插件 | 失败请求记录路径 |
 | `CODEX_TZ_PROXY` | 辅助脚本 | 出口代理；`direct`/`none` 强制直连 |
-| `CODEX_TZ_REFRESH_INTERVAL` | 辅助脚本 | `--serve` 周期刷新秒数，默认 `900`，`0` 关闭周期刷新 |
+| `CODEX_TZ_REFRESH_INTERVAL` | 插件 + 辅助脚本 | 状态保鲜期与自愈/周期刷新秒数，默认 `900`，`0` 关闭周期刷新与请求路径自愈 |
+| `CODEX_TZ_HELPER` | 插件 | 按需拉起时使用的 `refresh_egress.py` 路径 |
+| `CODEX_TZ_PYTHON` | 插件 | 按需拉起时使用的 Python 解释器路径 |
 
 插件侧也可在 CPA 插件配置中设置 `data_dir`（管理端/桌面客户端插件页渲染为表单），效果等同于 `CODEX_TZ_DATA_DIR`；辅助脚本请设置相同的 `CODEX_TZ_DATA_DIR`，两边才会落到同一目录。
 
@@ -118,7 +125,7 @@ python3 refresh_egress.py --serve
 
 macOS 与 Linux 一样使用 Unix Domain Socket 进行手动「获取」。Windows 系统的 Python 不支持 Unix Socket，因此 Windows DLL 与 `refresh_egress.py --serve` 通过 CPA 数据目录中的文件请求/应答信箱通信：`<CODEX_TZ_REFRESH_SOCKET>.ready`、`.request`、`.<nonce>.reply`。只传递随机请求标识与 OK/ERR 状态，**不会把用户请求正文放入信箱**。Windows 主机必须确保共享目录仅允许可信管理员和 CPA 账户读写（NTFS ACL），并用 `python -m pip install tzdata` 安装 IANA 时区数据。
 
-在 Windows/macOS 上，如果只有动态库而没有运行探测辅助脚本，管理界面的「获取」会提示失败（并给出实际的 Socket 路径与处理建议），但通过外部定时任务生成的有效状态文件仍可供时区改写使用。
+在 Windows/macOS 上，即使只有动态库而没有运行探测辅助脚本，管理界面的「获取」也会由插件按需拉起助手完成检测（v0.7.0 起）；找不到助手时会给出数据目录与 `CODEX_TZ_HELPER` 提示。通过外部定时任务生成的有效状态文件同样可供时区改写使用。
 
 ## 管理界面与数据安全
 

@@ -4,12 +4,17 @@
     {
       "id": "codex-chronos",
       "name": "Codex Chronos 时区同步",
-      "description": "根据代理出口 IP 检测时区，自动校正 Codex 请求中的日期与时区；提供中文管理面板、手动检测、请求统计、模型一致性监控和失败请求日志。",
+      "description": "根据代理出口 IP 检测时区，自动校正 Codex 请求中的日期与时区；提供中文管理面板、手动检测、请求统计、模型一致性监控和失败请求日志。桌面化改造分支：支持非容器部署、数据目录自动定位、本机代理自动探测、无守护进程按需刷新。",
       "author": "ZhiPenTu",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "repository": "https://github.com/ZhiPenTu/codex-chronos",
       "homepage": "https://github.com/ZhiPenTu/codex-chronos",
-      "tags": ["codex", "timezone", "request-interceptor", "management"]
+      "tags": [
+        "codex",
+        "timezone",
+        "request-interceptor",
+        "management"
+      ]
     }
   ]
 }

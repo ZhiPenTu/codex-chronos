@@ -19,6 +19,7 @@
 #include <sys/stat.h>
 #include "platform_compat.h"
 #include "paths.inc"
+#include "spawn_refresh.inc"
 static void derive_local_date(char *date,size_t cap,const char *offset);
 #include "dashboard_bundle.h"
 
@@ -168,7 +169,12 @@ static int timezone_context(char *dst,size_t cap) {
   struct stat st;
   // Fail open if the egress observation is missing or older than two hours.
   // This avoids incorrectly asserting a timezone after a proxy node switch.
-  if(stat(state,&st)!=0 || time(NULL)-st.st_mtime>7200 || st.st_mtime>time(NULL)+60) return 0;
+  if(stat(state,&st)!=0 || time(NULL)-st.st_mtime>7200 || st.st_mtime>time(NULL)+60) {
+    // Self-heal: refresh in the background so the next request has a
+    // timezone again (rate limited, no daemon required).
+    tz_maybe_background_refresh();
+    return 0;
+  }
   FILE *fp=fopen(state,"r");
   if(!fp)return 0;
   char line[256];
@@ -383,6 +389,9 @@ static void intercept(const uint8_t *request,size_t len,cliproxy_buffer *respons
 static void handle_status(cliproxy_buffer *out) {
   sync_settings cfg=load_settings();sync_state state;
   int available=load_state(&state);
+  // Self-heal: kick a background refresh when no daemon keeps the state
+  // file fresh. Rate limited; a no-op while the state is recent.
+  tz_maybe_background_refresh();
   char dir_escaped[CODEX_TZ_PATH_CAP*2],socket_escaped[CODEX_TZ_PATH_CAP*2];
   tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
   tz_json_escape(socket_escaped,sizeof(socket_escaped),tz_refresh_socket_path());
@@ -583,7 +592,7 @@ static int plugin_call(const char *method,const uint8_t *request,size_t request_
     // config_yaml is authoritative on every (re)configuration.
     tz_set_config_data_dir("");
     load_config_from_request(request,request_len);
-    reply(response,"{\"ok\":true,\"result\":{\"schema_version\":1,\"metadata\":{\"Name\":\"Codex Chronos\",\"Version\":\"0.6.0\",\"Author\":\"ZhiPenTu\",\"GitHubRepository\":\"https://github.com/ZhiPenTu/codex-chronos\",\"ConfigFields\":[{\"Name\":\"data_dir\",\"Type\":\"string\",\"Description\":\"数据目录（状态/统计/日志/失败记录）。留空=自动定位：容器内为 /CLIProxyAPI/data，桌面端为用户目录下 .codex-chronos。辅助脚本需设置相同的 CODEX_TZ_DATA_DIR。\"}]},\"capabilities\":{\"request_interceptor\":true,\"management_api\":true,\"response_interceptor\":true,\"response_stream_interceptor\":true,\"websocket_response_observer\":true}}}");
+    reply(response,"{\"ok\":true,\"result\":{\"schema_version\":1,\"metadata\":{\"Name\":\"Codex Chronos\",\"Version\":\"0.7.0\",\"Author\":\"ZhiPenTu\",\"GitHubRepository\":\"https://github.com/ZhiPenTu/codex-chronos\",\"ConfigFields\":[{\"Name\":\"data_dir\",\"Type\":\"string\",\"Description\":\"数据目录（状态/统计/日志/失败记录）。留空=自动定位：容器内为 /CLIProxyAPI/data，桌面端为用户目录下 .codex-chronos。辅助脚本需设置相同的 CODEX_TZ_DATA_DIR。\"}]},\"capabilities\":{\"request_interceptor\":true,\"management_api\":true,\"response_interceptor\":true,\"response_stream_interceptor\":true,\"websocket_response_observer\":true}}}");
     return 0;
   }
   if(!strcmp(method,"management.register")) {
