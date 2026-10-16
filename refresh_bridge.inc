@@ -1,12 +1,45 @@
-// Ask a host-side helper to refresh the actual Mihomo egress timezone.
+// Ask a host-side helper to refresh the actual egress timezone.
 // TCP/network credentials never cross the CPA public plugin resource route.
+
+// Build the 503 body for a failed egress refresh. helper_error is NULL when
+// the helper could not be reached at all, or a short reason when the helper
+// itself answered ERR (surfaced from refresh_egress.py).
+static void refresh_failure(cliproxy_buffer *out, const char *path,
+                            const char *helper_error) {
+  char safe_path[CODEX_TZ_PATH_CAP*2];
+  char safe_error[512];
+  char reason[CODEX_TZ_PATH_CAP*4];
+  tz_json_escape(safe_path,sizeof(safe_path),path);
+  tz_json_escape(safe_error,sizeof(safe_error),helper_error);
+  if (safe_error[0]) {
+    snprintf(reason,sizeof(reason),
+      "{\"ok\":false,\"reason\":\"出口检测失败：刷新服务返回错误（%s）。请查看 refresh_egress.py 运行日志；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
+      safe_error);
+  } else {
+    snprintf(reason,sizeof(reason),
+      "{\"ok\":false,\"reason\":\"出口检测失败：无法连接刷新服务 %s。请确认主机端 refresh_egress.py --serve 正在运行；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
+      safe_path);
+  }
+  http_response(out,503,"application/json",reason);
+}
+
+// Extract a short helper error reason from an "ERR <reason>\n" reply.
+static const char *helper_error_from(const char *response, char *buf, size_t cap) {
+  if (!response || strncmp(response,"ERR",3)!=0) return NULL;
+  size_t w=0;
+  for (size_t i=4; response[i] && response[i]!='\n' && response[i]!='\r' && w+1<cap; i++) {
+    if (response[i]!='\t') buf[w++]=(char)(unsigned char)response[i];
+  }
+  buf[w]=0;
+  return w ? buf : "未知错误";
+}
+
 #ifdef _WIN32
 // Windows' standard Python distribution has no AF_UNIX. Use a private,
 // shared-directory request/reply mailbox consumed by refresh_egress.py --serve.
 static plugin_mutex_t refresh_mutex=PLUGIN_MUTEX_INITIALIZER;
 static void handle_probe_egress(cliproxy_buffer *out) {
-  const char *path=getenv("CODEX_TZ_REFRESH_SOCKET");
-  if(!path||!*path)path="C:\\CLIProxyAPI\\data\\codex-timezone-sync-refresh.sock";
+  const char *path=tz_refresh_socket_path();
   if(strlen(path)>800) {
     http_response(out,500,"application/json","{\"ok\":false,\"reason\":\"invalid refresh path\"}");return;
   }
@@ -34,12 +67,17 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   }
   if(!published)DeleteFileA(temporary);
   int ok=0;
+  char helper_error[512]="";
   if(published)for(int i=0;i<160;i++) {
     FILE *reply=fopen(response,"rb");
     if(reply) {
-      char line[16]={0};
+      char line[256]={0};
       ok=fgets(line,sizeof(line),reply)!=NULL && line[0]=='O' && line[1]=='K' &&
         (line[2]=='\n'||line[2]=='\r');
+      if(!ok) {
+        const char *err=helper_error_from(line,helper_error,sizeof(helper_error));
+        if(err && err!=helper_error)snprintf(helper_error,sizeof(helper_error),"%s",err);
+      }
       fclose(reply);break;
     }
     Sleep(150);
@@ -48,11 +86,11 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   DeleteFileA(response);
   plugin_mutex_unlock(&refresh_mutex);
   if(!ok) {
-    http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"refresh helper unavailable or failed\"}");return;
+    refresh_failure(out,path,helper_error[0]?helper_error:NULL);return;
   }
   sync_state fresh;
   if(!load_state(&fresh)) {
-    http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"egress state unavailable\"}");return;
+    http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"出口检测后状态仍不可用\"}");return;
   }
   char json[320];
   snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
@@ -67,8 +105,7 @@ static void handle_probe_egress(cliproxy_buffer *out) {
 #define MSG_NOSIGNAL 0
 #endif
 static void handle_probe_egress(cliproxy_buffer *out) {
-  const char *path=getenv("CODEX_TZ_REFRESH_SOCKET");
-  if(!path||!*path)path="/CLIProxyAPI/data/codex-timezone-sync-refresh.sock";
+  const char *path=tz_refresh_socket_path();
   struct sockaddr_un addr;
   memset(&addr,0,sizeof(addr));
   addr.sun_family=AF_UNIX;
@@ -87,20 +124,20 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
   int connected=connect(fd,(struct sockaddr *)&addr,sizeof(addr))==0;
   int sent=connected && send(fd,"REFRESH\n",8,MSG_NOSIGNAL)==8;
-  char response[16]={0};
+  char response[256]={0};
   ssize_t got=sent?recv(fd,response,sizeof(response)-1,0):-1;
   close(fd);
   if(got<3 || memcmp(response,"OK\n",3)!=0) {
-    http_response(out,503,"application/json",
-      "{\"ok\":false,\"reason\":\"出口检测失败；请检查主机刷新服务及 Mihomo 出口\"}");return;
+    char helper_error[512]="";
+    const char *err=helper_error_from(response,helper_error,sizeof(helper_error));
+    refresh_failure(out,path,err);return;
   }
   sync_state fresh;
   if(!load_state(&fresh)) {
     http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"出口检测后状态仍不可用\"}");return;
   }
   char json[320];
-  snprintf(json,sizeof(json),
-    "{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
+  snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
     fresh.zone,fresh.ip,fresh.offset);
   http_response(out,200,"application/json",json);
 }

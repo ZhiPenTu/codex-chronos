@@ -1,12 +1,13 @@
 // Persistent success/failure totals, independent of the optional activity logger.
 // One short flock transaction per attempted Codex rewrite, mode 0600.
 static const char *stats_path(void) {
-  const char *p=getenv("CODEX_TZ_STATS_FILE");
-  return p&&*p?p:"/CLIProxyAPI/data/codex-timezone-sync.stats";
+  return tz_stats_path();
 }
 static int stats_update(int success,int failure,int reset,
                         unsigned long long *s,unsigned long long *f) {
-  int fd=open(stats_path(),O_RDWR|O_CREAT|O_NOFOLLOW,0600);
+  const char *path=stats_path();
+  if(tz_ensure_parent(path)!=0)return 0;
+  int fd=open(path,O_RDWR|O_CREAT|O_NOFOLLOW,0600);
   if(fd<0)return 0;
   struct stat st;
   if(flock(fd,LOCK_EX)!=0 || fstat(fd,&st)!=0 || !S_ISREG(st.st_mode)) {close(fd);return 0;}

@@ -2,13 +2,13 @@
   "schema_version": 1,
   "plugins": [
     {
-      "id": "codex-timezone-sync",
-      "name": "Codex 时区同步",
+      "id": "codex-chronos",
+      "name": "Codex Chronos 时区同步",
       "description": "根据代理出口 IP 检测时区，自动校正 Codex 请求中的日期与时区；提供中文管理面板、手动检测、请求统计、模型一致性监控和失败请求日志。",
-      "author": "LonelyHerbivore",
-      "version": "0.5.1",
-      "repository": "https://github.com/LonelyHerbivore/codex-timezone-sync",
-      "homepage": "https://github.com/LonelyHerbivore/codex-timezone-sync",
+      "author": "ZhiPenTu",
+      "version": "0.6.0",
+      "repository": "https://github.com/ZhiPenTu/codex-chronos",
+      "homepage": "https://github.com/ZhiPenTu/codex-chronos",
       "tags": ["codex", "timezone", "request-interceptor", "management"]
     }
   ]

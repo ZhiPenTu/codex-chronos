@@ -1,4 +1,4 @@
-name: Build and release Codex Timezone Sync
+name: Build and release Codex Chronos
 
 on:
   push:
@@ -54,14 +54,14 @@ jobs:
       - name: Build DLL (Windows UCRT64)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: gcc -O2 -std=c11 -Wall -Wextra -Werror -shared -o codex-timezone-sync.dll plugin.c -static-libgcc -lws2_32
+        run: gcc -O2 -std=c11 -Wall -Wextra -Werror -shared -o codex-chronos.dll plugin.c -static-libgcc -lws2_32
       - name: Run native plugin tests (Windows)
         if: runner.os == 'Windows'
         run: python test_plugin.py
       - name: Test Mihomo egress helper
         run: python test_egress.py
       - name: Assemble CPA-compatible plugin ZIP
-        run: python package_release.py 0.5.1 ${{ matrix.platform }}
+        run: python package_release.py 0.6.0 ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-${{ matrix.platform }}
@@ -82,11 +82,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version=0.5.1
+          version=0.6.0
           test "${GITHUB_REF_NAME}" = "v${version}"
           cd dist
           for platform in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64 windows_amd64; do
-            test -s "codex-timezone-sync_${version}_${platform}.zip"
+            test -s "codex-chronos_${version}_${platform}.zip"
           done
           test "$(find . -name '*.zip' -type f | wc -l)" -eq 5
           sha256sum *.zip > checksums.txt
@@ -97,5 +97,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/*.zip dist/checksums.txt \
-            --title "Codex Timezone Sync ${GITHUB_REF_NAME}" \
+            --title "Codex Chronos ${GITHUB_REF_NAME}" \
             --notes "Codex 时区同步插件。支持 Linux amd64 / arm64、macOS Intel / Apple Silicon 和 Windows amd64。中文管理面板、出口时区检测、改写统计、模型一致性检测及失败请求日志。需要单独安装出口时区检测辅助服务；详情参见 README。"

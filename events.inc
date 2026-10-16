@@ -5,8 +5,7 @@
 #define EVENT_LIMIT 131072
 #define EVENT_ROWS 80
 static const char *log_path(void) {
-  const char *p=getenv("CODEX_TZ_LOG_FILE");
-  return p && *p ? p : "/CLIProxyAPI/data/codex-timezone-sync.events";
+  return tz_log_path();
 }
 static void log_event_detail(const char *kind,const char *original) {
   sync_settings cfg=load_settings();
@@ -15,6 +14,7 @@ static void log_event_detail(const char *kind,const char *original) {
   int available=load_state(&state);
   const char *zone=available?state.zone:"unknown";
   const char *path=log_path();
+  if(tz_ensure_parent(path)!=0)return;
   int fd=open(path,O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
   if(fd<0)return;
   struct stat st;

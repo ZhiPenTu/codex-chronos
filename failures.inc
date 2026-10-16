@@ -4,14 +4,15 @@
 #define FAILURE_FILE_MAX (48u * 1024u * 1024u)
 #define FAILURE_ROWS 12
 static const char *failure_path(void) {
-  const char *p=getenv("CODEX_TZ_FAILURE_FILE");
-  return p&&*p?p:"/CLIProxyAPI/data/codex-timezone-sync.failures";
+  return tz_failure_path();
 }
 static int persist_failure(const char *reason,const char *body,size_t len) {
   if(!body||!reason||len>MAX_REQUEST)return 0;
   char *encoded=b64encode((const unsigned char *)body,len);
   if(!encoded)return 0;
-  int fd=open(failure_path(),O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
+  const char *path=failure_path();
+  if(tz_ensure_parent(path)!=0){free(encoded);return 0;}
+  int fd=open(path,O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
   if(fd<0){free(encoded);return 0;}
   struct stat st;
   if(flock(fd,LOCK_EX)!=0 || fstat(fd,&st)!=0 || !S_ISREG(st.st_mode) ||
@@ -138,7 +139,9 @@ static void handle_failure_view(const char *raw,const tok *tokens,int body,clipr
   free(json);
 }
 static void handle_clear_failures(cliproxy_buffer *out) {
-  int fd=open(failure_path(),O_WRONLY|O_CREAT|O_NOFOLLOW,0600);
+  const char *path=failure_path();
+  if(tz_ensure_parent(path)!=0){http_response(out,500,"application/json","{\"ok\":false}");return;}
+  int fd=open(path,O_WRONLY|O_CREAT|O_NOFOLLOW,0600);
   if(fd<0){http_response(out,500,"application/json","{\"ok\":false}");return;}
   struct stat st;
   int ok=flock(fd,LOCK_EX)==0&&fstat(fd,&st)==0&&S_ISREG(st.st_mode)&&ftruncate(fd,0)==0;

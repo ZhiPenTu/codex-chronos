@@ -45,7 +45,7 @@ with sync_playwright() as p:
         undefined;
     ''')
     page.set_content(html.decode('utf-8'))
-    assert page.title()=='Codex Timezone Sync'
+    assert page.title()=='Codex Chronos'
     page.locator('#management-key').fill('test-secret-key')
     page.locator('#connect').click()
     page.locator('#zone').get_by_text('America/Los_Angeles').wait_for()

@@ -30,12 +30,15 @@ struct sockaddr_un { ADDRESS_FAMILY sun_family; char sun_path[108]; };
 #include <time.h>
 // MinGW's C runtime can differ from the host process CRT (Python/Go).
 // Read the current Windows process environment directly instead of a CRT copy.
+// The list must cover every CODEX_TZ_* variable plus the well-known Windows
+// variables used by the desktop path fallback in paths.inc.
 static const char *plugin_getenv(const char *name) {
   static const char *names[]={"CODEX_TZ_LOG_FILE","CODEX_TZ_CONFIG_FILE",
     "CODEX_TZ_STATE_FILE","CODEX_TZ_STATS_FILE","CODEX_TZ_FAILURE_FILE",
-    "CODEX_TZ_REFRESH_SOCKET"};
-  static char values[6][2048];
-  for(unsigned i=0;i<6;i++)if(strcmp(name,names[i])==0){
+    "CODEX_TZ_REFRESH_SOCKET","CODEX_TZ_DATA_DIR",
+    "HOME","USERPROFILE","LOCALAPPDATA","APPDATA","XDG_DATA_HOME"};
+  static char values[12][2048];
+  for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++)if(strcmp(name,names[i])==0){
     DWORD len=GetEnvironmentVariableA(name,values[i],sizeof(values[i]));
     return len>0&&len<sizeof(values[i])?values[i]:NULL;
   }

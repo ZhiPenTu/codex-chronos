@@ -6,8 +6,7 @@
 
 typedef struct { int enabled, logging, debug; } sync_settings;
 static const char *config_path(void) {
-  const char *p=getenv("CODEX_TZ_CONFIG_FILE");
-  return p && *p ? p : "/CLIProxyAPI/data/codex-timezone-sync.config";
+  return tz_config_path();
 }
 static sync_settings load_settings(void) {
   sync_settings cfg={1,1,0};
@@ -28,7 +27,8 @@ static int save_settings(sync_settings cfg) {
   size_t n=strlen(path);
   if(n>1024)return 0;
   char temp[1100];snprintf(temp,sizeof(temp),"%s.XXXXXX",path);
-  int fd=mkstemp(temp);
+  int fd=-1;
+  if(tz_ensure_parent(path)==0)fd=mkstemp(temp);
   if(fd<0)return 0;
   char data[70];
   int m=snprintf(data,sizeof(data),"enabled=%d\nlogging=%d\ndebug=%d\n",cfg.enabled,cfg.logging,cfg.debug);
@@ -70,8 +70,7 @@ static int parse_settings_body(const char *raw,size_t len,sync_settings *cfg) {
 typedef struct { char zone[80],date[18],abbr[18],offset[12],ip[64]; long age; } sync_state;
 static int load_state(sync_state *state) {
   memset(state,0,sizeof(*state));
-  const char *path=getenv("CODEX_TZ_STATE_FILE");
-  if(!path||!*path)path=DEFAULT_STATE;
+  const char *path=tz_state_path();
   struct stat st;
   if(stat(path,&st)!=0)return 0;
   state->age=(long)difftime(time(NULL),st.st_mtime);

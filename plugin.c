@@ -1,4 +1,4 @@
-// codex-timezone-sync: CLIProxyAPI C ABI v1 request interceptor.
+// codex-chronos: CLIProxyAPI C ABI v1 request interceptor.
 // No third-party C libraries; fail-open. Only failed Codex API bodies may be archived.
 // Transport credentials and surrounding management/interceptor headers are excluded.
 #ifdef _WIN32
@@ -18,6 +18,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include "platform_compat.h"
+#include "paths.inc"
 static void derive_local_date(char *date,size_t cap,const char *offset);
 #include "dashboard_bundle.h"
 
@@ -25,7 +26,6 @@ static void derive_local_date(char *date,size_t cap,const char *offset);
 #define MAX_REQUEST (12u * 1024u * 1024u)
 #define MAX_TOKENS 150000
 #define TZ_MARKER "[CPAMC_TIMEZONE_V1]"
-#define DEFAULT_STATE "/CLIProxyAPI/data/codex-timezone-sync.state"
 
 typedef struct { void *ptr; size_t len; } cliproxy_buffer;
 typedef int (*host_call_fn)(void *, const char *, const uint8_t *, size_t, cliproxy_buffer *);
@@ -164,8 +164,7 @@ static int timezone_context(char *dst,size_t cap) {
   char zone[80]="",date[18]="",abbr[18]="",offset[12]="";
   const char *allowed_zone="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_+-";
   const char *allowed_abbr="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-";
-  const char *state=getenv("CODEX_TZ_STATE_FILE");
-  if(!state || !*state)state=DEFAULT_STATE;
+  const char *state=tz_state_path();
   struct stat st;
   // Fail open if the egress observation is missing or older than two hours.
   // This avoids incorrectly asserting a timezone after a proxy node switch.
@@ -293,7 +292,11 @@ static void http_response(cliproxy_buffer *out,int code,const char *kind,const c
 
 static void handle_clear_activity(cliproxy_buffer *out) {
   // Clear only the activity stream and volatile model observations.
-  int fd=open(log_path(),O_WRONLY|O_CREAT|O_NOFOLLOW,0600);
+  const char *path=log_path();
+  if(tz_ensure_parent(path)!=0) {
+    http_response(out,500,"application/json","{\"ok\":false,\"reason\":\"unable to open events\"}");return;
+  }
+  int fd=open(path,O_WRONLY|O_CREAT|O_NOFOLLOW,0600);
   if(fd<0) {http_response(out,500,"application/json","{\"ok\":false,\"reason\":\"unable to open events\"}");return;}
   struct stat st;
   int ok=flock(fd,LOCK_EX)==0 && fstat(fd,&st)==0 && S_ISREG(st.st_mode) && ftruncate(fd,0)==0;
@@ -380,11 +383,15 @@ static void intercept(const uint8_t *request,size_t len,cliproxy_buffer *respons
 static void handle_status(cliproxy_buffer *out) {
   sync_settings cfg=load_settings();sync_state state;
   int available=load_state(&state);
-  char json[768];
+  char dir_escaped[CODEX_TZ_PATH_CAP*2],socket_escaped[CODEX_TZ_PATH_CAP*2];
+  tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
+  tz_json_escape(socket_escaped,sizeof(socket_escaped),tz_refresh_socket_path());
+  char json[3072];
   snprintf(json,sizeof(json),
-    "{\"ok\":true,\"available\":%s,\"timezone\":\"%s\",\"date\":\"%s\",\"abbreviation\":\"%s\",\"offset\":\"%s\",\"ip\":\"%s\",\"age_seconds\":%ld,\"settings\":{\"enabled\":%s,\"logging\":%s,\"debug\":%s}}",
+    "{\"ok\":true,\"available\":%s,\"timezone\":\"%s\",\"date\":\"%s\",\"abbreviation\":\"%s\",\"offset\":\"%s\",\"ip\":\"%s\",\"age_seconds\":%ld,\"settings\":{\"enabled\":%s,\"logging\":%s,\"debug\":%s},\"data_dir\":\"%s\",\"refresh_socket\":\"%s\"}",
     available?"true":"false",available?state.zone:"",available?state.date:"",available?state.abbr:"",available?state.offset:"",available?state.ip:"",available?state.age:-1L,
-    cfg.enabled?"true":"false",cfg.logging?"true":"false",cfg.debug?"true":"false");
+    cfg.enabled?"true":"false",cfg.logging?"true":"false",cfg.debug?"true":"false",
+    dir_escaped,socket_escaped);
   http_response(out,200,"application/json",json);
 }
 static void handle_selftest(cliproxy_buffer *out) {
@@ -445,55 +452,55 @@ static void management_page(const uint8_t *request,size_t request_len,cliproxy_b
   int body=get_field(raw,ts,nt,obj,"Body");
   if(body<0)body=get_field(raw,ts,nt,obj,"body");
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/status")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/status")) {
     free(ts);handle_status(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/models")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/models")) {
     free(ts);handle_model_records(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/logs")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/logs")) {
     free(ts);handle_logs(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/stats")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/stats")) {
     free(ts);handle_stats(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/stats/clear")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/stats/clear")) {
     free(ts);handle_clear_stats(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/activity/clear")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/activity/clear")) {
     free(ts);handle_clear_activity(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/egress/refresh")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/egress/refresh")) {
     free(ts);handle_probe_egress(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/failures")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/failures")) {
     free(ts);handle_failures(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/failures/view")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/failures/view")) {
     handle_failure_view(raw,ts,body,response);free(ts);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/failures/clear")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/failures/clear")) {
     free(ts);handle_clear_failures(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"POST") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/selftest")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/selftest")) {
     free(ts);handle_selftest(response);return;
   }
   if(path>=0 && verb>=0 && string_is(raw,ts[verb],"PUT") &&
-    string_is(raw,ts[path],"/v0/management/plugins/codex-timezone-sync/settings")) {
+    string_is(raw,ts[path],"/v0/management/plugins/codex-chronos/settings")) {
     handle_settings(raw,ts,body,response);free(ts);return;
   }
   int valid=(path>=0 && verb>=0 && string_is(raw,ts[verb],"GET") &&
-             string_is(raw,ts[path],"/v0/resource/plugins/codex-timezone-sync/panel"));
+             string_is(raw,ts[path],"/v0/resource/plugins/codex-chronos/panel"));
   free(ts);
   if (!valid) {
     reply(response,"{\"ok\":true,\"result\":{\"StatusCode\":404,\"Headers\":{\"Content-Type\":[\"text/plain; charset=utf-8\"]},\"Body\":\"Tm90IGZvdW5k\"}}");
@@ -511,29 +518,90 @@ static void management_page(const uint8_t *request,size_t request_len,cliproxy_b
   free(encoded);
 }
 
+// Extract data_dir from the CPA plugins.configs YAML. The host passes
+// plugin-owned fields verbatim; only flat "key: value" lines are understood.
+static void apply_config_yaml(const char *yaml) {
+  if (!yaml) return;
+  const char *p = yaml;
+  while (*p) {
+    const char *eol = strchr(p, '\n');
+    size_t len = eol ? (size_t)(eol - p) : strlen(p);
+    while (len && (*p == ' ' || *p == '\t')) { p++; len--; }
+    const char *key = "data_dir:";
+    size_t klen = strlen(key);
+    if (len > klen && strncmp(p, key, klen) == 0) {
+      p += klen;
+      len -= klen;
+      while (len && (*p == ' ' || *p == '\t')) { p++; len--; }
+      if (len >= 2 && ((*p == '"' && p[len - 1] == '"') ||
+                       (*p == '\'' && p[len - 1] == '\''))) {
+        p++;
+        len -= 2;
+      }
+      while (len && (p[len - 1] == '\r' || p[len - 1] == ' ' || p[len - 1] == '\t')) len--;
+      if (len && len < CODEX_TZ_PATH_CAP) {
+        char dir[CODEX_TZ_PATH_CAP];
+        memcpy(dir, p, len);
+        dir[len] = 0;
+        tz_set_config_data_dir(dir);
+      }
+      return; // first data_dir entry wins
+    }
+    if (!eol) break;
+    p = eol + 1;
+  }
+}
+
+// Read config_yaml from a plugin.register / plugin.reconfigure request.
+static void load_config_from_request(const uint8_t *request, size_t request_len) {
+  if (!request || !request_len || request_len > MAX_REQUEST) return;
+  const char *raw = (const char *)request;
+  tok *ts = malloc(MAX_TOKENS * sizeof(tok));
+  if (!ts) return;
+  int nt = parse_json(raw, request_len, ts, MAX_TOKENS);
+  if (nt >= 1 && ts[0].type == OBJECT) {
+    int obj = 0;
+    int wrap = get_field(raw, ts, nt, obj, "request");
+    if (wrap >= 0 && ts[wrap].type == OBJECT) obj = wrap;
+    int cfg = get_field(raw, ts, nt, obj, "config_yaml");
+    if (cfg < 0) cfg = get_field(raw, ts, nt, obj, "configYaml");
+    if (cfg >= 0 && ts[cfg].type == STRING) {
+      char *yaml = json_unescape(raw, ts[cfg]);
+      if (yaml) {
+        apply_config_yaml(yaml);
+        free(yaml);
+      }
+    }
+  }
+  free(ts);
+}
+
 static int plugin_call(const char *method,const uint8_t *request,size_t request_len,cliproxy_buffer *response) {
   if(response){response->ptr=NULL;response->len=0;}
   if(!method||!response)return 1;
   if(!strcmp(method,"plugin.register")||!strcmp(method,"plugin.reconfigure")) {
-    reply(response,"{\"ok\":true,\"result\":{\"schema_version\":1,\"metadata\":{\"Name\":\"Codex Timezone Sync\",\"Version\":\"0.5.1\",\"Author\":\"LonelyHerbivore\",\"GitHubRepository\":\"https://github.com/LonelyHerbivore/codex-timezone-sync\",\"ConfigFields\":[]},\"capabilities\":{\"request_interceptor\":true,\"management_api\":true,\"response_interceptor\":true,\"response_stream_interceptor\":true,\"websocket_response_observer\":true}}}");
+    // config_yaml is authoritative on every (re)configuration.
+    tz_set_config_data_dir("");
+    load_config_from_request(request,request_len);
+    reply(response,"{\"ok\":true,\"result\":{\"schema_version\":1,\"metadata\":{\"Name\":\"Codex Chronos\",\"Version\":\"0.6.0\",\"Author\":\"ZhiPenTu\",\"GitHubRepository\":\"https://github.com/ZhiPenTu/codex-chronos\",\"ConfigFields\":[{\"Name\":\"data_dir\",\"Type\":\"string\",\"Description\":\"数据目录（状态/统计/日志/失败记录）。留空=自动定位：容器内为 /CLIProxyAPI/data，桌面端为用户目录下 .codex-chronos。辅助脚本需设置相同的 CODEX_TZ_DATA_DIR。\"}]},\"capabilities\":{\"request_interceptor\":true,\"management_api\":true,\"response_interceptor\":true,\"response_stream_interceptor\":true,\"websocket_response_observer\":true}}}");
     return 0;
   }
   if(!strcmp(method,"management.register")) {
     reply(response,
       "{\"ok\":true,\"result\":{\"Routes\":["
-      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-timezone-sync/status\"},"
-      "{\"Method\":\"PUT\",\"Path\":\"/plugins/codex-timezone-sync/settings\"},"
-      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-timezone-sync/logs\"},"
-      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-timezone-sync/models\"},"
-      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-timezone-sync/stats\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/stats/clear\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/activity/clear\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/egress/refresh\"},"
-      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-timezone-sync/failures\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/failures/view\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/failures/clear\"},"
-      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-timezone-sync/selftest\"}],"
-      "\"Resources\":[{\"Path\":\"/panel\",\"Menu\":\"Codex Timezone Sync\",\"Description\":\"Codex 请求时区同步状态与控制\"}]}}");
+      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-chronos/status\"},"
+      "{\"Method\":\"PUT\",\"Path\":\"/plugins/codex-chronos/settings\"},"
+      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-chronos/logs\"},"
+      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-chronos/models\"},"
+      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-chronos/stats\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/stats/clear\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/activity/clear\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/egress/refresh\"},"
+      "{\"Method\":\"GET\",\"Path\":\"/plugins/codex-chronos/failures\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/failures/view\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/failures/clear\"},"
+      "{\"Method\":\"POST\",\"Path\":\"/plugins/codex-chronos/selftest\"}],"
+      "\"Resources\":[{\"Path\":\"/panel\",\"Menu\":\"Codex Chronos\",\"Description\":\"Codex 请求时区同步状态与控制\"}]}}");
     return 0;
   }
   if(!strcmp(method,"management.handle")) {management_page(request,request_len,response);return 0;}

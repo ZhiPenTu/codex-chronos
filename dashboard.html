@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Codex Timezone Sync</title>
+<title>Codex Chronos</title>
 <style>
 :root{color-scheme:dark;--bg:#121110;--card:#1b1a18;--card2:#22211f;--line:#605035;--sub:#b3b0aa;--text:#f1f0ee;--gold:#edb858;--gold2:#c18c3e;--green:#43d98b;--red:#f58b79}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 55% 5%,#201e1b 0%,var(--bg) 60%);font:15px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);min-height:100vh}
@@ -32,7 +32,7 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
   <header class="top">
     <div class="identity">
       <div class="symbol" aria-hidden="true"><svg viewBox="0 0 88 70"><circle cx="37" cy="31" r="26"/><path d="M11 31h45M37 5c-17 14-18 36 0 51M37 5c16 12 17 31 7 45M16 18h42"/><circle cx="59" cy="51" r="16" fill="#191713"/><path d="M59 41v11l8 5"/></svg></div>
-      <div><h1>Codex Timezone Sync</h1><div class="subtitle">同步 Codex 请求时区与出口节点时区</div></div>
+      <div><h1>Codex Chronos</h1><div class="subtitle">同步 Codex 请求时区与出口节点时区</div></div>
     </div>
     <div class="toptools"><button class="square" id="top-refresh" title="刷新信息" aria-label="刷新信息"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5 9A8 8 0 0 1 19 7l1 5M4 12l1 5a8 8 0 0 0 14-2"/></svg></button></div>
   </header>
@@ -88,11 +88,12 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
     <section id="settings-view" class="panel"><h2>设置说明</h2><div class="settings-grid"><div class="setting-card"><strong>生效方式</strong><p>在「概览」修改开关后点击「保存设置」，配置立即生效，不需要重启 CPA。</p></div><div class="setting-card"><strong>出口时区来源</strong><p>定时任务及手动获取均由服务器宿主机通过 Mihomo 探测，手动获取需要刷新辅助服务运行。</p></div><div class="setting-card"><strong>日志与隐私</strong><p>普通活动记录不保存提示词；失败日志独立保存完整 Codex 请求体（可能含敏感信息），权限为 0600，单文件上限 48 MiB。</p></div><div class="setting-card"><strong>状态有效期</strong><p>检测记录超过两小时将被视为过期，插件暂停注入，以免使用错误时区。</p></div></div></section>
   </main>
   <div class="footer" id="updated">未连接管理接口</div>
+  <div class="footer muted" id="data-dir"></div>
 </div>
 <script>
 'use strict';
 (() => {
-  const path='/v0/management/plugins/codex-timezone-sync/';
+  const path='/v0/management/plugins/codex-chronos/';
   const $=id=>document.getElementById(id);
   function savedManagementKey(){
     try {
@@ -136,6 +137,7 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
     $('toggle-sync').disabled=false;$('toggle-log').disabled=false;
     select('flag-sync',enabled);select('flag-state',ok);select('flag-rewrite',enabled&&ok);select('flag-log',status.settings.logging);
     $('updated').textContent=`上次刷新：${new Date().toLocaleString('zh-CN')} · 状态记录约 ${ok?Math.floor(status.age_seconds/60)+' 分钟前':'不可用'}`;
+    $('data-dir').textContent=status.data_dir?('数据目录：'+status.data_dir):'';
   }
   function renderStats(){
     $('count-success').textContent=stats.success;
@@ -198,7 +200,7 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
   async function refresh(){
     if(!managementKey){feedback('请先连接管理接口',true);return;}
     try {
-      const [s,l,m,c,f]=await Promise.all([api('status'),api('logs'),api('models').catch(()=>({matched:0,mismatched:0,unknown:0,records:[]})),api('stats'),api('failures')]);
+      const [s,l,m,c,f]=await Promise.all([api('status'),api('logs'),api('models').catch(()=>({matched:0,mismatched:0,unknown:0,records:[]})),api('stats').catch(()=>({success:0,failure:0})),api('failures').catch(()=>({records:[]}))]);
       status=s;logs=l.events||[];models=m;stats=c;failures=f.records||[];
       renderStatus();renderStats();renderActivity();renderFailures();feedback('信息已更新');
       $('connection').textContent='● 已连接 CPA 管理接口';$('connection').className='helper connected';

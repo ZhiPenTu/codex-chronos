@@ -26,7 +26,7 @@ Shutdown = ct.CFUNCTYPE(None)
 class API(ct.Structure):
     _fields_ = [('abi_version', ct.c_uint32), ('call', Call), ('free_buffer', Free), ('shutdown', Shutdown)]
 
-LIB = ct.CDLL(str(ROOT / ('codex-timezone-sync.dll' if sys.platform == 'win32' else 'codex-timezone-sync.dylib' if sys.platform == 'darwin' else 'codex-timezone-sync.so')))
+LIB = ct.CDLL(str(ROOT / ('codex-chronos.dll' if sys.platform == 'win32' else 'codex-chronos.dylib' if sys.platform == 'darwin' else 'codex-chronos.so')))
 LIB.cliproxy_plugin_init.argtypes = [ct.c_void_p, ct.POINTER(API)]
 LIB.cliproxy_plugin_init.restype = ct.c_int
 API_OBJ = API()
@@ -91,17 +91,17 @@ class TestTimezonePlugin(unittest.TestCase):
         self.assertTrue(reg['capabilities']['management_api'])
         menus = call('management.register')['result']['Resources']
         self.assertEqual(menus[0]['Path'], '/panel')
-        page = call('management.handle', {'Method':'GET', 'Path':'/v0/resource/plugins/codex-timezone-sync/panel'})['result']
+        page = call('management.handle', {'Method':'GET', 'Path':'/v0/resource/plugins/codex-chronos/panel'})['result']
         self.assertEqual(page['StatusCode'], 200)
         self.assertEqual(page['Headers']['Content-Type'], ['text/html; charset=utf-8'])
         html = base64.b64decode(page['Body']).decode('utf-8')
-        self.assertIn('Codex Timezone Sync', html)
+        self.assertIn('Codex Chronos', html)
         self.assertNotIn('SECRET', html)
         bad = call('management.handle', {'Method':'GET', 'Path':'/unknown'})['result']
         self.assertEqual(bad['StatusCode'], 404)
 
     def _management(self, path, method='GET', data=None):
-        request={'Path':f'/v0/management/plugins/codex-timezone-sync/{path}', 'Method':method}
+        request={'Path':f'/v0/management/plugins/codex-chronos/{path}', 'Method':method}
         if data is not None:
             request['Body']=base64.b64encode(json.dumps(data).encode()).decode()
         response=call('management.handle',request)['result']
@@ -534,6 +534,125 @@ class TestTimezonePlugin(unittest.TestCase):
         self.logfile.unlink(missing_ok=True)
         invoke({'input':[]})
         self.assertEqual(self._management('logs')[1]['events'][0]['timezone_before'],'unknown')
+
+class TestDesktopFallbackPaths(unittest.TestCase):
+    """Non-container runs must fall back to a per-user data directory."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Keep paths short: macOS sun_path is limited to 104 bytes.
+        short_tmp = '/tmp' if os.path.isdir('/tmp') else None
+        cls.temp = tempfile.TemporaryDirectory(prefix='tz-', dir=short_tmp)
+        cls.home = pathlib.Path(cls.temp.name) / 'home'
+        cls.home.mkdir()
+        cls.state = pathlib.Path(cls.temp.name) / 'timezone.state'
+        cls.state.write_text('America/Los_Angeles|2026-10-11|PDT|-07:00\n66.92.223.4\n')
+        cls.socketpath = pathlib.Path(cls.temp.name) / 'refresh.sock'
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp.cleanup()
+
+    def setUp(self):
+        # Start from a clean environment: no per-file overrides, fake HOME.
+        keys = ('CODEX_TZ_STATE_FILE','CODEX_TZ_CONFIG_FILE','CODEX_TZ_LOG_FILE',
+                'CODEX_TZ_STATS_FILE','CODEX_TZ_FAILURE_FILE','CODEX_TZ_REFRESH_SOCKET',
+                'CODEX_TZ_DATA_DIR','HOME','XDG_DATA_HOME','USERPROFILE',
+                'LOCALAPPDATA','APPDATA')
+        self.saved = {k: os.environ.pop(k, None) for k in keys}
+        os.environ['HOME'] = str(self.home)
+        os.environ['USERPROFILE'] = str(self.home)
+        os.environ['CODEX_TZ_STATE_FILE'] = str(self.state)
+        if os.name == 'nt':
+            os.environ['LOCALAPPDATA'] = str(self.home / 'AppData' / 'Local')
+            os.environ['APPDATA'] = str(self.home / 'AppData' / 'Roaming')
+        # A known starting point for the config_yaml-provided data_dir.
+        call('plugin.reconfigure', {'config_yaml': ''})
+        self._container = pathlib.Path('/CLIProxyAPI/data').is_dir()
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def _expected_dir(self):
+        if os.name == 'nt':
+            return pathlib.Path(os.environ['LOCALAPPDATA']) / 'codex-chronos'
+        if sys.platform == 'darwin':
+            return self.home / '.codex-chronos'
+        return self.home / '.local' / 'share' / 'codex-chronos'
+
+    def _management(self, path, method='GET', data=None):
+        request = {'Path': f'/v0/management/plugins/codex-chronos/{path}',
+                   'Method': method}
+        if data is not None:
+            request['Body'] = base64.b64encode(json.dumps(data).encode()).decode()
+        response = call('management.handle', request)['result']
+        return response['StatusCode'], json.loads(base64.b64decode(response['Body']))
+
+    def test_stats_created_in_fallback_dir(self):
+        if self._container:
+            self.skipTest('container data directory present')
+        base = self._expected_dir()
+        code, _ = self._management('stats/clear', 'POST')
+        self.assertEqual(code, 200)
+        code, stats = self._management('stats')
+        self.assertEqual(code, 200)
+        self.assertEqual(stats, {'ok': True, 'success': 0, 'failure': 0})
+        self.assertTrue((base / 'codex-chronos.stats').is_file())
+
+    def test_settings_and_logs_use_fallback_dir(self):
+        if self._container:
+            self.skipTest('container data directory present')
+        base = self._expected_dir()
+        code, saved = self._management('settings', 'PUT', {'enabled': True})
+        self.assertEqual(code, 200)
+        self.assertTrue((base / 'codex-chronos.config').is_file())
+        self.assertIsNotNone(invoke({'input': []}))
+        code, logs = self._management('logs')
+        self.assertEqual(code, 200)
+        self.assertTrue(logs['events'])
+        self.assertTrue((base / 'codex-chronos.events').is_file())
+
+    def test_config_yaml_data_dir_overrides_fallback(self):
+        if self._container:
+            self.skipTest('container data directory present')
+        custom = pathlib.Path(self.temp.name) / 'custom-dir'
+        reg = call('plugin.register',
+                   {'config_yaml': f'data_dir: "{custom}"\nenabled: true\n'})
+        fields = reg['result']['metadata']['ConfigFields']
+        self.assertEqual(fields[0]['Name'], 'data_dir')
+        code, stats = self._management('stats')
+        self.assertEqual(code, 200)
+        self.assertTrue((custom / 'codex-chronos.stats').is_file())
+        # A reconfigure without data_dir falls back to automatic resolution.
+        call('plugin.reconfigure', {'config_yaml': 'enabled: true\n'})
+        code, stats = self._management('stats')
+        self.assertEqual(code, 200)
+        self.assertTrue((self._expected_dir() / 'codex-chronos.stats').is_file())
+
+    def test_status_reports_data_dir_and_socket(self):
+        if self._container:
+            self.skipTest('container data directory present')
+        code, status = self._management('status')
+        self.assertEqual(code, 200)
+        self.assertTrue(status['available'])
+        self.assertEqual(status['data_dir'], str(self._expected_dir()))
+        self.assertEqual(status['refresh_socket'],
+                         str(self._expected_dir() / 'codex-chronos-refresh.sock'))
+
+    def test_refresh_failure_names_socket_path(self):
+        if self._container:
+            self.skipTest('container data directory present')
+        code, result = self._management('egress/refresh', 'POST')
+        self.assertEqual(code, 503)
+        self.assertFalse(result['ok'])
+        self.assertIn('codex-chronos-refresh.sock', result['reason'])
+        self.assertIn('refresh_egress.py', result['reason'])
+        self.assertNotIn('Mihomo', result['reason'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
