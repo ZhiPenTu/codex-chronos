@@ -139,7 +139,7 @@ static const char *tz_data_dir(void) {
     out[0] = 0;
     return out;
   }
-  snprintf(out, sizeof(out), "%s\\%s", base, CODEX_TZ_DIRNAME);
+  snprintf(out, sizeof(out), "%s" CODEX_TZ_SEP_STR "%s", base, CODEX_TZ_DIRNAME);
 #elif defined(__APPLE__)
   const char *home = getenv("HOME");
   if (!home || !*home) {
@@ -170,7 +170,7 @@ static const char *tz_join(const char *filename) {
     out[0] = 0;
     return out;
   }
-  snprintf(out, sizeof(out), "%s/%s", dir, filename);
+  snprintf(out, sizeof(out), "%s" CODEX_TZ_SEP_STR "%s", dir, filename);
   return out;
 }
 

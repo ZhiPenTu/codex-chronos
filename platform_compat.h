@@ -2,6 +2,17 @@
 #ifndef CODEX_TZ_PLATFORM_COMPAT_H
 #define CODEX_TZ_PLATFORM_COMPAT_H
 
+// Path conventions shared by paths.inc and spawn_refresh.inc.
+#ifdef _WIN32
+#define CODEX_TZ_PATH_LIST_SEP ';'
+#define CODEX_TZ_SEP_CHAR '\\'
+#define CODEX_TZ_SEP_STR "\\"
+#else
+#define CODEX_TZ_PATH_LIST_SEP ':'
+#define CODEX_TZ_SEP_CHAR '/'
+#define CODEX_TZ_SEP_STR "/"
+#endif
+
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0A00
@@ -35,9 +46,11 @@ struct sockaddr_un { ADDRESS_FAMILY sun_family; char sun_path[108]; };
 static const char *plugin_getenv(const char *name) {
   static const char *names[]={"CODEX_TZ_LOG_FILE","CODEX_TZ_CONFIG_FILE",
     "CODEX_TZ_STATE_FILE","CODEX_TZ_STATS_FILE","CODEX_TZ_FAILURE_FILE",
-    "CODEX_TZ_REFRESH_SOCKET","CODEX_TZ_DATA_DIR",
+    "CODEX_TZ_REFRESH_SOCKET","CODEX_TZ_DATA_DIR","CODEX_TZ_HELPER",
+    "CODEX_TZ_PYTHON","CODEX_TZ_REFRESH_INTERVAL","PATH",
     "HOME","USERPROFILE","LOCALAPPDATA","APPDATA","XDG_DATA_HOME"};
-  static char values[12][2048];
+  // PATH can be long on Windows; every other entry is a short path/value.
+  static char values[16][8192];
   for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++)if(strcmp(name,names[i])==0){
     DWORD len=GetEnvironmentVariableA(name,values[i],sizeof(values[i]));
     return len>0&&len<sizeof(values[i])?values[i]:NULL;
@@ -56,6 +69,10 @@ static const char *plugin_getenv(const char *name) {
 #define gmtime_r plugin_gmtime_r
 static struct tm *plugin_gmtime_r(const time_t *value, struct tm *out) {
   return gmtime_s(out,value)==0 ? out : NULL;
+}
+#define localtime_r plugin_localtime_r
+static struct tm *plugin_localtime_r(const time_t *value, struct tm *out) {
+  return localtime_s(out,value)==0 ? out : NULL;
 }
 #define strndup plugin_strndup
 static char *plugin_strndup(const char *s,size_t size) {

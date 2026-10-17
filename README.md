@@ -2,16 +2,16 @@
 
 用于 [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI) 的 Codex 请求时区同步插件。适合 OAuth 账号通过代理出口访问 Codex 时，需要让请求内的日期、时区与代理出口所在地区保持一致的场景。
 
-> 本项目分支自 [LonelyHerbivore/codex-timezone-sync](https://github.com/LonelyHerbivore/codex-timezone-sync)（原版面向容器 + mihomo 部署）。本分支（Codex Chronos）由 ZhiPenTu 维护，重点改造了桌面（非容器）部署能力：路径自动定位、本机代理自动探测、常驻辅助服务。上游仓库未声明 License，引用请注明原作者。
+> 本项目早期代码来源于 [LonelyHerbivore/codex-timezone-sync](https://github.com/LonelyHerbivore/codex-timezone-sync)，原版面向容器 + mihomo 部署。本分支由 ZhiPenTu 维护，管理面板已按 Chronos Relay 的信息架构与视觉系统独立重写，并持续改造桌面部署能力：路径自动定位、本机代理自动探测、按需刷新与自动保鲜。上游仓库未声明 License，重新发布前仍需完成授权与来源审查。
 
-**当前版本：v0.6.0。目标平台：Linux amd64 / arm64、macOS amd64 / arm64、Windows amd64。** 采用 CPA C ABI v1，带中文管理面板。各平台发布包只有在 GitHub Actions 对应系统原生构建与测试成功后才发布。v0.6.0 起完整支持**桌面（非容器）部署**：无需 Docker、无需 mihomo 容器，数据目录自动落到用户目录，辅助脚本自动探测本机代理。
+**当前版本：v0.7.0。目标平台：Linux amd64 / arm64、macOS amd64 / arm64、Windows amd64。** 采用 CPA C ABI v1，带中文管理面板。各平台发布包只有在 GitHub Actions 对应系统原生构建与测试成功后才发布。v0.7.0 起完整支持**桌面（非容器）部署**：无需 Docker、无需 mihomo 容器，数据目录自动落到用户目录，辅助脚本自动探测本机代理。
 
 ## 功能
 
 - 根据代理出口 IP 检测 IANA 时区及当地日期；对 Codex 请求中的环境日期和时区做校正，而不修改宿主机系统时间。
 - 提供中文管理面板，查看当前出口 IP、时区、最近同步记录及模型一致性观测。
 - 支持启用/禁用时区改写、活动日志、调试日志。
-- 支持手动点击「获取」重新检测出口时区（需要部署独立辅助服务）。
+- 支持手动点击「获取」重新检测出口时区，并可在面板中开启自动保鲜，按 5 / 15 / 30 / 60 分钟周期保存最新出口状态。
 - 统计成功和失败的改写次数，可清空统计；最近活动记录显示协议并支持清空。
 - 仅在请求改写失败时保存原始 Codex 请求体，可在管理界面查看或清空。
 - 时区状态不可用或过期时采用 *fail-open* 策略，不主动阻断 Codex 原始请求。
@@ -45,11 +45,12 @@ make                      # 生成 codex-chronos.dylib / .so / .dll
 
 ### 刷新机制（v0.7.0 起无需守护进程）
 
-插件有三层刷新保障，按优先级自动选择：
+插件有四层刷新保障，按优先级自动选择：
 
 1. **面板「获取」按钮**：优先连接刷新 Socket（有 `refresh_egress.py --serve` 在跑时）；连不上时**插件自行拉起助手跑一次刷新**并直接返回结果——桌面零配置可用的关键。
 2. **请求路径自愈**：状态文件缺失或超过 `CODEX_TZ_REFRESH_INTERVAL`（默认 900 秒）未更新时，插件会在后台悄然刷新一次（双 fork 防僵尸、按间隔限速），随后的请求即可拿到时区。
-3. **常驻服务（可选）**：`python3 refresh_egress.py --serve` 常驻时，Socket 通道响应更快，且自带周期刷新。不运行时上述两层完全兜底，**时区状态最长 2 小时内仍然有效（fail-open），不会阻断任何请求**。
+3. **面板自动保鲜**：管理面板连接后默认每 15 分钟调用一次 `egress/refresh`，把最新出口 IP、IANA 时区、UTC 偏移和日期写入状态文件；可在「快捷操作」中暂停或调整为 5 / 15 / 30 / 60 分钟。该设置仅保存在当前浏览器，不保存管理密钥以外的服务端配置。
+4. **常驻服务（可选）**：`python3 refresh_egress.py --serve` 常驻时，Socket 通道响应更快，且自带周期刷新。不运行时前三层完全兜底，**时区状态最长 2 小时内仍然有效（fail-open），不会阻断任何请求**。
 
 助手脚本查找顺序：`CODEX_TZ_HELPER` 环境变量 > 数据目录 > 插件库所在目录 > EasyCLIProxyAPI 应用数据目录 > `~/.codex-chronos/` > `/usr/local/lib/codex-chronos/`。解释器查找：`CODEX_TZ_PYTHON` > `/usr/bin/python3` > PATH。
 
@@ -131,6 +132,10 @@ macOS 与 Linux 一样使用 Unix Domain Socket 进行手动「获取」。Windo
 
 打开 CPA 管理界面的「Codex Chronos」插件菜单。相关管理 API 必须使用 CPA 管理密钥，浏览器中的静态面板本身不公开统计或请求日志。面板底部会显示当前生效的数据目录与刷新 Socket 路径，便于桌面排查。
 
+面板主题跟随 CPA 管理端的公共配置：优先读取控制台在 `localStorage` 中保存的主题偏好（`cli-proxy-theme`，与「深色 / 白色 / 跟随系统」设置一致）；没有公共配置时以**白色底色**为默认，并自带对应的深色配色。切换控制台主题后，面板会即时同步，无需重新打开。
+
+面板支持「记住密码」：勾选后（默认勾选）连接成功时把管理密钥按控制台的同一套混淆方式存入本机浏览器的 `localStorage`（键 `codex-chronos-auth`，值是绑定当前域名与浏览器 UA 的 `enc::v1::` 混淆，并非强加密），下次打开面板会自动连接；取消勾选会立即清除该记录。该存储独立于 CPA 控制台自身的登录凭据（`cli-proxy-auth`），插件不会改写控制台状态；未勾选时仍会优先复用控制台已记住的凭据，否则每次都需要重新输入密钥。
+
 **失败请求日志可能包含提示词、文件内容和其他敏感数据。** 插件会保存完整的失败 Codex *请求体*，不保存外围 HTTP Headers、OAuth Cookie 或代理转发封装；但如果请求体中原本带有秘密，仍会一并保存。日志默认在持久化目录中以 `0600` 权限创建，具有大小上限。不要公开数据目录、不要将数据文件加入 Git 或备份到公开存储。
 
 支持的存储位置覆盖：`CODEX_TZ_CONFIG_FILE`、`CODEX_TZ_LOG_FILE`、`CODEX_TZ_STATE_FILE`、`CODEX_TZ_STATS_FILE`、`CODEX_TZ_FAILURE_FILE`。上述配置作用于 CPA 插件进程，与辅助脚本使用的 `CODEX_TZ_STATE` 是不同的环境变量。
@@ -145,15 +150,18 @@ make test
 python3 test_egress.py
 ```
 
-包含 45 项 C ABI/管理接口/改写行为/桌面路径测试及 17 项出口检测辅助脚本测试。浏览器测试可按需执行 `python3 test_ui.py`、`python3 test_auth_ui.py`（需 Chrome/Chromium 和 Playwright）。
+包含 48 项 C ABI/管理接口/改写行为/桌面路径测试及 17 项出口检测辅助脚本测试。浏览器测试可按需执行 `python3 test_ui.py`、`python3 test_auth_ui.py`（需 Chrome/Chromium 和 Playwright），覆盖公共主题回退、记住密码和自动刷新出口时区。
 
 > macOS 备注：个别新版 SDK（27+）的 `libSystem.B.tbd` 含有旧版 `ld64` 不认识的 `arm64e.x1` 架构，直接链接会报 `tapi error`。Makefile 已内置回退：默认 SDK 链接失败时自动改用本机较旧 SDK 重试，通常无需人工干预。
 
-发布 Workflow 为 Linux amd64 和 arm64 分别构建并运行测试，以 `v0.6.0` 等 Git tag 发布 GitHub Release。插件商店使用的发布文件格式：
+发布 Workflow 在 Linux amd64 / arm64、macOS amd64 / arm64、Windows amd64 五个原生环境分别构建并运行测试；推送 `v*` Git tag 时还会校验五个 ZIP，生成校验和并创建 GitHub Release。插件商店使用的发布文件格式：
 
 ```text
-codex-chronos_0.6.0_linux_amd64.zip
-codex-chronos_0.6.0_linux_arm64.zip
+codex-chronos_0.7.0_linux_amd64.zip
+codex-chronos_0.7.0_linux_arm64.zip
+codex-chronos_0.7.0_darwin_amd64.zip
+codex-chronos_0.7.0_darwin_arm64.zip
+codex-chronos_0.7.0_windows_amd64.zip
 checksums.txt
 ```
 

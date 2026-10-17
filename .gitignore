@@ -21,3 +21,4 @@ dist/
 preview.png
 deploy.sh
 .DS_Store
+.workbuddy/

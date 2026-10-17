@@ -3,10 +3,11 @@
 // Transport credentials and surrounding management/interceptor headers are excluded.
 #ifdef _WIN32
 #define __USE_MINGW_ANSI_STDIO 1
-#endif
-#ifdef __APPLE__
+#elif defined(__APPLE__)
 #define _DARWIN_C_SOURCE 1
-#elif !defined(_WIN32)
+#else
+// glibc only declares Dl_info/dladdr (spawn_refresh.inc) under _GNU_SOURCE.
+#define _GNU_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include <ctype.h>
@@ -196,8 +197,9 @@ static int timezone_context(char *dst,size_t cap) {
   return 1;
 }
 
-// splice a literal ASCII addition, preserving all other JSON bytes.
-static char *splice(const char *src,size_t n,size_t where,size_t remove,const char *add,size_t m,size_t *out_n) {
+// Splice a literal ASCII addition, preserving all other JSON bytes.
+// Named json_splice to avoid the glibc splice(2) declared by _GNU_SOURCE.
+static char *json_splice(const char *src,size_t n,size_t where,size_t remove,const char *add,size_t m,size_t *out_n) {
   if(where>n||remove>n-where||n-remove>MAX_REQUEST-m)return NULL;
   size_t size=n-remove+m;
   char *dst=malloc(size+1);if(!dst)return NULL;
@@ -229,7 +231,7 @@ static char *rewrite_payload(const char *payload,size_t len,size_t *new_len) {
           if(add[i]=='\n'){escaped[k++]='\\';escaped[k++]='n';}
           else if(add[i]=='"'||add[i]=='\\'){escaped[k++]='\\';escaped[k++]=add[i];}
           else escaped[k++]=add[i];}
-          answer=splice(payload,len,(size_t)end,0,escaped,k,new_len);free(escaped);
+          answer=json_splice(payload,len,(size_t)end,0,escaped,k,new_len);free(escaped);
         }free(add);
       }
     }
@@ -242,7 +244,7 @@ static char *rewrite_payload(const char *payload,size_t len,size_t *new_len) {
       else if(*c=='"'||*c=='\\'){escaped[k++]='\\';escaped[k++]=*c;}
       else escaped[k++]=*c;}
       escaped[k++]='"';
-      answer=splice(payload,len,(size_t)ts[instructions].start,4,escaped,k,new_len);free(escaped);
+      answer=json_splice(payload,len,(size_t)ts[instructions].start,4,escaped,k,new_len);free(escaped);
     }
   } else if(instructions>=0) {
     // Do not insert duplicate instructions when an unexpected type exists.
@@ -254,7 +256,7 @@ static char *rewrite_payload(const char *payload,size_t len,size_t *new_len) {
       else if(*c=='"'||*c=='\\'){escaped[k++]='\\';escaped[k++]=*c;}
       else escaped[k++]=*c;}
       escaped[k++]='"';escaped[k++]=',';
-      answer=splice(payload,len,(size_t)ts[0].start+1,0,escaped,k,new_len);free(escaped);
+      answer=json_splice(payload,len,(size_t)ts[0].start+1,0,escaped,k,new_len);free(escaped);
     }
   } else if(messages>=0 && ts[messages].type==ARRAY) {
     // Chat-completions routed to Codex: prepend one developer message.
@@ -269,7 +271,7 @@ static char *rewrite_payload(const char *payload,size_t len,size_t *new_len) {
       size_t at=(size_t)ts[messages].start+1;
       size_t check=at;while(check<len&&isspace((unsigned char)payload[check]))check++;
       if(check<len&&payload[check]!=']')escaped[k++]=',';
-      answer=splice(payload,len,at,0,escaped,k,new_len);free(escaped);
+      answer=json_splice(payload,len,at,0,escaped,k,new_len);free(escaped);
     }
   }
   free(ts);return answer;
@@ -395,7 +397,9 @@ static void handle_status(cliproxy_buffer *out) {
   char dir_escaped[CODEX_TZ_PATH_CAP*2],socket_escaped[CODEX_TZ_PATH_CAP*2];
   tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
   tz_json_escape(socket_escaped,sizeof(socket_escaped),tz_refresh_socket_path());
-  char json[3072];
+  // Sized for both escaped paths (2*CAP each) plus every state/settings field,
+  // so MinGW's -Wformat-truncation can prove the write always fits.
+  char json[CODEX_TZ_PATH_CAP*5];
   snprintf(json,sizeof(json),
     "{\"ok\":true,\"available\":%s,\"timezone\":\"%s\",\"date\":\"%s\",\"abbreviation\":\"%s\",\"offset\":\"%s\",\"ip\":\"%s\",\"age_seconds\":%ld,\"settings\":{\"enabled\":%s,\"logging\":%s,\"debug\":%s},\"data_dir\":\"%s\",\"refresh_socket\":\"%s\"}",
     available?"true":"false",available?state.zone:"",available?state.date:"",available?state.abbr:"",available?state.offset:"",available?state.ip:"",available?state.age:-1L,

@@ -63,9 +63,9 @@ with sync_playwright() as p:
     page.get_by_text('出口时区检测完成',exact=False).wait_for()
     assert '出口时区不可用' in page.locator('#failure-body').inner_text()
     page.locator('#failure-body button').first.click()
-    assert 'example request' in page.locator('#failure-json').inner_text()
+    page.get_by_text('example request',exact=False).wait_for()
     page.locator('#clear-failures').click()
-    assert '暂无校正失败日志' in page.locator('#failure-body').inner_text()
+    page.locator('#failure-body').get_by_text('暂无校正失败日志').wait_for()
     page.locator('#clear-stats').click()
     page.get_by_text('校正统计已清空').wait_for()
     assert page.locator('#count-success').inner_text()=='0'

@@ -1,30 +1,6 @@
 // Ask a host-side helper to refresh the actual egress timezone.
 // TCP/network credentials never cross the CPA public plugin resource route.
 
-// Build the 503 body for a failed egress refresh. helper_error is NULL when
-// the helper could not be reached at all, or a short reason when the helper
-// itself answered ERR (surfaced from refresh_egress.py).
-#ifdef _WIN32
-static void refresh_failure(cliproxy_buffer *out, const char *path,
-                            const char *helper_error) {
-  char safe_path[CODEX_TZ_PATH_CAP*2];
-  char safe_error[512];
-  char reason[CODEX_TZ_PATH_CAP*4];
-  tz_json_escape(safe_path,sizeof(safe_path),path);
-  tz_json_escape(safe_error,sizeof(safe_error),helper_error);
-  if (safe_error[0]) {
-    snprintf(reason,sizeof(reason),
-      "{\"ok\":false,\"reason\":\"出口检测失败：刷新服务返回错误（%s）。请查看 refresh_egress.py 运行日志；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
-      safe_error);
-  } else {
-    snprintf(reason,sizeof(reason),
-      "{\"ok\":false,\"reason\":\"出口检测失败：无法连接刷新服务 %s。请确认主机端 refresh_egress.py --serve 正在运行；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
-      safe_path);
-  }
-  http_response(out,503,"application/json",reason);
-}
-#endif // _WIN32
-
 // Extract a short helper error reason from an "ERR <reason>\n" reply.
 #ifdef _WIN32
 static const char *helper_error_from(const char *response, char *buf, size_t cap) {
@@ -42,6 +18,45 @@ static const char *helper_error_from(const char *response, char *buf, size_t cap
 // Windows' standard Python distribution has no AF_UNIX. Use a private,
 // shared-directory request/reply mailbox consumed by refresh_egress.py --serve.
 static plugin_mutex_t refresh_mutex=PLUGIN_MUTEX_INITIALIZER;
+
+// Answer the 获取 button from the state file once the helper has run.
+// Returns 1 when a response was written.
+static int windows_loaded_state(cliproxy_buffer *out) {
+  sync_state fresh;
+  if(!load_state(&fresh))return 0;
+  char json[320];
+  snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
+    fresh.zone,fresh.ip,fresh.offset);
+  http_response(out,200,"application/json",json);
+  return 1;
+}
+
+// Mirror the POSIX route: no --serve daemon is the normal desktop case, so
+// run refresh_egress.py right now instead of failing the button.
+static void windows_on_demand_refresh(cliproxy_buffer *out,const char *path) {
+  int ran=tz_refresh_once(45);
+  if(ran==0 && windows_loaded_state(out))return;
+  if(ran<0) {
+    // Distinguish "no script/interpreter found" from a helper that failed.
+    char dir_escaped[CODEX_TZ_PATH_CAP*2];
+    tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
+    char reason[CODEX_TZ_PATH_CAP*4];
+    snprintf(reason,sizeof(reason),
+      "{\"ok\":false,\"reason\":\"出口检测失败：未找到刷新助手 refresh_egress.py（已搜索 CODEX_TZ_HELPER、数据目录与插件目录）。请将其放入数据目录 %s，或用 CODEX_TZ_HELPER 指定路径；也可运行 refresh_egress.py --serve\"}",
+      dir_escaped);
+    http_response(out,503,"application/json",reason);
+    return;
+  }
+  char log_escaped[CODEX_TZ_PATH_CAP*2];
+  tz_json_escape(log_escaped,sizeof(log_escaped),tz_join("helper.log"));
+  char reason[CODEX_TZ_PATH_CAP*4];
+  snprintf(reason,sizeof(reason),
+    "{\"ok\":false,\"reason\":\"出口检测失败：刷新助手 refresh_egress.py 运行失败，请查看日志 %s；如经代理出口，请将 CODEX_TZ_PROXY 指向该代理（直连可设为 direct）\"}",
+    log_escaped);
+  http_response(out,503,"application/json",reason);
+  (void)path;
+}
+
 static void handle_probe_egress(cliproxy_buffer *out) {
   const char *path=tz_refresh_socket_path();
   if(strlen(path)>800) {
@@ -51,7 +66,7 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   snprintf(request,sizeof(request),"%s.request",path);
   snprintf(ready,sizeof(ready),"%s.ready",path);
   if(GetFileAttributesA(ready)==INVALID_FILE_ATTRIBUTES) {
-    http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"refresh helper unavailable\"}");return;
+    windows_on_demand_refresh(out,path);return;
   }
   plugin_mutex_lock(&refresh_mutex);
   static LONG seq=0;
@@ -90,16 +105,12 @@ static void handle_probe_egress(cliproxy_buffer *out) {
   DeleteFileA(response);
   plugin_mutex_unlock(&refresh_mutex);
   if(!ok) {
-    refresh_failure(out,path,helper_error[0]?helper_error:NULL);return;
+    // A stale .ready marker with no live daemon: fall back to on-demand.
+    windows_on_demand_refresh(out,path);return;
   }
-  sync_state fresh;
-  if(!load_state(&fresh)) {
+  if(!windows_loaded_state(out)) {
     http_response(out,503,"application/json","{\"ok\":false,\"reason\":\"出口检测后状态仍不可用\"}");return;
   }
-  char json[320];
-  snprintf(json,sizeof(json),"{\"ok\":true,\"timezone\":\"%s\",\"ip\":\"%s\",\"offset\":\"%s\"}",
-    fresh.zone,fresh.ip,fresh.offset);
-  http_response(out,200,"application/json",json);
 }
 #else
 #include <sys/socket.h>

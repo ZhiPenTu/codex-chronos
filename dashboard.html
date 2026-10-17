@@ -3,107 +3,165 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
+<script>
+// Theme: reuse the CPA console's shared preference (localStorage "cli-proxy-theme");
+// without a shared preference, fall back to the white base theme.
+(function(){
+  var KEY='cli-proxy-theme';
+  function shared(){
+    var raw=null;
+    try{raw=localStorage.getItem(KEY);}catch(e){}
+    if(raw){
+      var theme=raw;
+      try{
+        var parsed=JSON.parse(raw);
+        var state=parsed&&parsed.state?parsed.state:parsed;
+        theme=state&&(state.theme||state.resolvedTheme);
+        if(!theme||theme==='auto')theme=state&&state.resolvedTheme;
+      }catch(e){}
+      if(typeof theme==='string'&&theme)return theme;
+    }
+    try{
+      if(window.parent&&window.parent!==window)return window.parent.document.documentElement.getAttribute('data-theme');
+    }catch(e){}
+    return '';
+  }
+  function apply(){
+    var theme=shared()==='dark'?'dark':'light';
+    if(theme==='dark')document.documentElement.setAttribute('data-theme','dark');
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  apply();
+  window.addEventListener('storage',function(event){if(!event||event.key===null||event.key===KEY)apply();});
+  try{
+    if(window.parent&&window.parent!==window&&window.parent.document)new MutationObserver(apply).observe(window.parent.document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  }catch(e){}
+})();
+</script>
 <title>Codex Chronos</title>
 <style>
-:root{color-scheme:dark;--bg:#121110;--card:#1b1a18;--card2:#22211f;--line:#605035;--sub:#b3b0aa;--text:#f1f0ee;--gold:#edb858;--gold2:#c18c3e;--green:#43d98b;--red:#f58b79}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 55% 5%,#201e1b 0%,var(--bg) 60%);font:15px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);min-height:100vh}
-button,input{font:inherit}button{cursor:pointer}button:disabled,input:disabled{opacity:.48;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-.app{max-width:1520px;margin:auto;padding:25px 36px 36px}.top{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}.identity{display:flex;align-items:center;gap:24px}.symbol{width:84px;height:68px;flex:none;color:var(--gold)}h1{font-size:34px;letter-spacing:-.5px;line-height:1.12;margin:0 0 5px;font-weight:700}h2{font-size:19px;margin:0 0 13px;font-weight:700}.subtitle{font-size:18px;letter-spacing:.3px;color:var(--sub)}
-.toptools{display:flex;gap:8px;align-items:center}.square{width:47px;height:45px;border:1px solid #49443c;background:#1b1a18;border-radius:9px;color:#ddd;display:grid;place-items:center}.square:hover{color:var(--gold);border-color:var(--gold)}
-svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.symbol svg{width:100%;height:100%;stroke-width:1.5}
-.auth{display:flex;gap:12px;align-items:center;border:1px solid #3b352c;border-radius:12px;padding:12px 16px;margin-bottom:14px;background:#211f1b}.auth label{font-weight:600;white-space:nowrap}.auth input{background:#141310;color:#fff;border:1px solid #4c463c;padding:10px 13px;border-radius:8px;flex:1;min-width:100px;max-width:360px}.auth .helper{color:var(--sub);font-size:13px;flex:1}.auth .connected{color:var(--green)}
-.tabs{display:flex;margin-bottom:14px}.tab{height:47px;min-width:112px;padding:0 20px;color:#d5d2ce;background:#201e1b;border:1px solid #35302a;margin-left:-1px}.tab:first-child{border-radius:10px 0 0 10px;margin-left:0}.tab:last-child{border-radius:0 10px 10px 0}.tab[aria-selected=true]{background:#2a2316;border:1px solid var(--gold);color:#f1c578;font-weight:700;border-radius:10px;position:relative;z-index:1}
-.panel{border:1px solid var(--line);background:linear-gradient(105deg,#1a1917,#201e1b);border-radius:13px;padding:22px 23px;min-width:0}.status{display:grid;grid-template-columns:1fr 1.35fr 1.36fr 1.17fr auto;align-items:center;gap:0;min-height:120px;margin-bottom:17px}.stat{padding:0 24px;border-right:1px solid #41403c;min-width:0}.stat:first-child{padding-left:12px}.stat:nth-child(4){border-right:0}.stat label{display:block;color:#c3c0bc;font-size:16px;margin-bottom:5px}.stat strong{font-size:17px;font-weight:550;overflow-wrap:anywhere}.big-status{color:var(--green)!important}.status-btn{padding-left:12px}
-.gold{background:linear-gradient(110deg,#f6c864,#c99142);color:#201408;border:1px solid #eec06c;font-weight:700;border-radius:10px;padding:14px 23px;display:inline-flex;gap:15px;align-items:center;justify-content:center;min-height:62px;white-space:nowrap}.gold:hover{filter:brightness(1.08)}.outline{background:transparent;border:1px solid #817c74;color:#eee;border-radius:10px;min-height:58px;display:inline-flex;align-items:center;justify-content:center;gap:14px;font-weight:600;padding:12px 20px}.outline:hover{border-color:var(--gold)}
-.content-grid{display:grid;grid-template-columns:minmax(0,2.6fr) minmax(290px,1fr);gap:18px;margin-bottom:17px}.section-icon{color:var(--gold);margin-right:11px;font-size:21px}.feature-head,.feature{display:grid;grid-template-columns:26% 45% 17% 12%;align-items:center;gap:0}.feature-head{background:#292724;border:1px solid #34312d;color:#d8d5d1;border-radius:9px 9px 0 0;padding:12px 18px}.feature{min-height:54px;border-bottom:1px solid #3b3935;padding:7px 18px}.feature span:nth-child(2){color:#c6c3bf;font-size:14px;padding-right:12px}.feature strong{font-weight:500}.dot{height:10px;width:10px;background:var(--green);display:inline-block;border-radius:50%;margin-right:9px}.dot.off{background:#929292}.danger{color:var(--red)}.positive{color:var(--green)}.muted{color:var(--sub)}
-.switch{display:inline-flex;align-items:center;cursor:pointer;position:relative;width:51px;height:29px}.switch input{opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}.switch span{width:51px;height:29px;border-radius:18px;background:#545454;border:1px solid #7c7c7c;transition:background .15s}.switch span:after{content:"";display:block;background:#fbfbfb;width:21px;height:21px;margin:3px;border-radius:50%;box-shadow:0 1px 4px #0006;transition:transform .15s}.switch input:checked+span{background:linear-gradient(100deg,#f3be59,#cc963e);border-color:#f3c265}.switch input:checked+span:after{transform:translateX(21px)}
-.operations .divider{border-top:1px solid #49443b;margin:15px 0 20px}.operations button{width:100%;margin:0 0 14px}.operations button:last-of-type{margin-bottom:0}.hint{font-size:12px;color:var(--sub);margin:12px 0 0}.log-panel{margin-top:16px}.table-wrap{overflow-x:auto}.table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}.table th{font-weight:500;color:#d5d1cc;background:#282623;padding:12px 15px}.table th:first-child{border-radius:8px 0 0 8px}.table th:last-child{border-radius:0 8px 8px 0}.table td{padding:10px 15px;border-bottom:1px solid #3a3733;color:#d7d3cf}.table td:last-child{color:var(--green)}.table .empty{text-align:center;color:var(--sub);padding:34px}.secondary{color:var(--sub)!important}
-#settings-view{display:none}#settings-view.active{display:block}#overview-view.hidden{display:none}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.bar p{margin:0;color:var(--sub)}.bar button{min-height:42px}.bar-actions{display:flex;gap:8px;flex-wrap:wrap}.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.setting-card{border:1px solid #3f3930;padding:18px;border-radius:11px;background:#24211d}.setting-card strong{display:block;margin-bottom:7px}.setting-card p{margin:0;color:var(--sub)}
-.feedback{margin-top:12px;min-height:24px;color:var(--gold);font-size:14px}.feedback.error{color:var(--red)}.footer{color:#827b70;font-size:12px;margin-top:18px;text-align:right}
-.metrics{display:flex;align-items:center;gap:28px;flex-wrap:wrap;margin-bottom:17px}.metrics strong{font-size:22px}.metrics .bar-actions{margin-left:auto}.metrics button{min-height:38px}
-.request-preview{white-space:pre-wrap;overflow:auto;max-height:420px;max-width:100%;font-size:12px;word-break:break-word;background:#11100f;border:1px solid #393632;padding:14px;border-radius:8px}
-@media(max-width:1150px){.status{grid-template-columns:1fr 1.3fr 1.3fr 1fr}.status-btn{grid-column:1/-1;padding:18px 10px 0}.status-btn button{width:100%;min-height:50px}.stat{padding:0 13px}.content-grid{grid-template-columns:1fr}.feature-head,.feature{grid-template-columns:27% 44% 17% 12%}}
-@media(max-width:700px){.app{padding:18px 13px}.identity{gap:10px}.symbol{width:48px;height:48px}h1{font-size:22px}.subtitle{font-size:13px}.toptools .square{width:39px;height:39px}.auth{flex-wrap:wrap}.auth .helper{min-width:100%}.tabs .tab{min-width:0;flex:1}.panel{padding:15px}.status{grid-template-columns:1fr 1fr;gap:16px}.stat{padding:0 6px;border:0}.stat label{font-size:13px}.stat strong{font-size:14px}.status-btn{padding:0}.feature-head,.feature{grid-template-columns:35% 43% 22%}.feature-head span:nth-child(4),.feature span:nth-child(4){grid-column:3;grid-row:auto}.feature-head span:nth-child(3),.feature span:nth-child(3){display:none}.feature span:nth-child(2){font-size:12px}.feature{padding:8px;min-height:65px}.feature-head{padding:8px}.settings-grid{grid-template-columns:1fr}}
+:root{color-scheme:light;--bg:#ffffff;--surface:#ffffff;--surface-soft:#f3f7f8;--surface-blue:#edf4f6;--nav:#14263d;--nav-soft:#203a57;--text:#1e2a36;--sub:#607080;--muted:#83909b;--line:#d7e1e5;--line-strong:#b8c9d1;--accent:#0e9f87;--accent-dark:#087866;--danger:#d96b5b;--input-bg:#203a57;--code-bg:#f3f7f8;--shadow:0 8px 22px rgba(20,38,61,.06)}
+:root[data-theme=dark]{color-scheme:dark;--bg:#0e1928;--surface:#14263d;--surface-soft:#172d45;--surface-blue:#1b344c;--nav:#091522;--nav-soft:#17324c;--text:#f3f7f8;--sub:#b5c4ce;--muted:#8798a5;--line:#30475a;--line-strong:#486276;--accent:#31c6a5;--accent-dark:#7ce1c9;--danger:#f18472;--input-bg:#203a57;--code-bg:#0c1a29;--shadow:none}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);font:14px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--text);min-height:100vh}button,input{font:inherit}button{cursor:pointer}button:disabled,input:disabled{opacity:.48;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}svg{width:20px;height:20px;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.app{min-height:100vh}.workspace{min-width:0;max-width:1480px;margin:0 auto;padding:30px clamp(20px,4vw,56px) 42px}.top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;max-width:1400px;margin:0 auto 22px}.identity h1{margin:0;color:var(--nav);font-size:32px;letter-spacing:-.04em;line-height:1.1}.identity .subtitle{margin:7px 0 0;color:var(--sub);font-size:14px}.toptools{display:flex;gap:8px}.square{width:42px;height:42px;border:1px solid var(--line-strong);background:var(--surface);border-radius:5px;color:var(--nav);display:grid;place-items:center}.square:hover{border-color:var(--accent);color:var(--accent)}.auth{display:grid;grid-template-columns:auto minmax(180px,330px) auto auto minmax(160px,1fr);align-items:center;gap:14px;max-width:1400px;margin:0 auto 14px;padding:14px 18px;background:var(--nav);border-radius:7px;color:#fff;box-shadow:var(--shadow)}.auth label{font-weight:700;white-space:nowrap}.auth input[type=password]{width:100%;padding:10px 12px;border:1px solid #4f6b82;border-radius:4px;background:var(--input-bg);color:#fff}.auth input::placeholder{color:#a9bdc9}.auth .remember{display:inline-flex;align-items:center;gap:7px;color:#c7d5dd;cursor:pointer;font-size:13px}.auth .remember input{flex:none;width:16px;height:16px;margin:0;accent-color:var(--accent)}.auth .helper{color:#a9bfcc;font-size:12px}.auth .connected{color:#6ee4c9}.primary{background:var(--accent);border:1px solid var(--accent);color:#06271f;border-radius:4px;min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:9px;font-weight:800;padding:9px 18px;white-space:nowrap}.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark)}.outline{background:transparent;border:1px solid var(--line-strong);color:var(--text);border-radius:4px;min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:9px;font-weight:700;padding:9px 16px}.outline:hover{border-color:var(--accent);color:var(--accent)}.view-switcher{display:flex;gap:0;max-width:1400px;margin:0 auto 18px;border-bottom:1px solid var(--line)}.view-switcher .tab{min-width:96px;padding:9px 16px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--sub);font-weight:700}.view-switcher .tab:hover{color:var(--accent)}.view-switcher .tab[aria-selected=true]{border-bottom-color:var(--accent);color:var(--nav)}
+.panel{border:1px solid var(--line);background:var(--surface);border-radius:7px;padding:22px 24px;min-width:0;box-shadow:var(--shadow)}.status{display:grid;grid-template-columns:210px repeat(4,minmax(0,1fr)) auto;align-items:center;gap:0;max-width:1400px;margin:0 auto 18px;border-top:3px solid var(--accent);padding-top:18px}.status-intro h2{margin:0;color:var(--nav);font-size:18px}.status-intro p{margin:5px 0 0;color:var(--sub);font-size:12px}.stat{min-width:0;padding:0 18px;border-left:1px solid var(--line)}.stat label{display:block;color:var(--sub);font-size:12px;margin-bottom:6px}.stat strong{display:block;color:var(--text);font-size:16px;font-weight:750;white-space:nowrap;overflow-wrap:normal}.big-status{color:var(--accent)!important}.status-btn{padding-left:18px}.status-btn .primary{min-height:46px}.metrics{display:flex;align-items:center;gap:26px;max-width:1400px;margin:0 auto 18px;padding:0 2px;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none}.metric{display:flex;align-items:baseline;gap:8px;padding:0 0 14px;color:var(--sub);font-size:13px}.metric strong{font-size:24px;line-height:1;color:var(--text)}.metric .positive{color:var(--accent)}.metric .danger{color:var(--danger)}.metrics .bar-actions{margin-left:auto;padding-bottom:10px}.metrics button{min-height:34px}
+.content-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,.78fr);gap:18px;max-width:1400px;margin:0 auto 18px}.panel-title{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}.panel-title h2{margin:0;color:var(--nav);font-size:19px}.panel-title p{margin:4px 0 0;color:var(--sub);font-size:12px}.section-icon{display:inline-flex;width:28px;height:28px;margin-right:8px;align-items:center;justify-content:center;background:var(--surface-blue);border-radius:4px;color:var(--accent);vertical-align:-6px}.feature-head,.feature{display:grid;grid-template-columns:26% 43% 17% 14%;align-items:center;gap:0}.feature-head{background:var(--surface-blue);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--sub);font-size:11px;letter-spacing:.04em;padding:11px 12px}.feature{min-height:62px;border-bottom:1px solid var(--line);padding:8px 12px}.feature:last-child{border-bottom:0}.feature span:nth-child(2){color:var(--sub);font-size:12px;padding-right:12px}.feature strong{font-size:13px;font-weight:750}.dot{height:8px;width:8px;background:var(--accent);display:inline-block;border-radius:50%;margin-right:7px}.dot.off{background:var(--muted)}.danger{color:var(--danger)}.positive{color:var(--accent)}.muted{color:var(--sub)}.switch{display:inline-flex;align-items:center;cursor:pointer;position:relative;width:42px;height:24px}.switch input{opacity:0;position:absolute;width:100%;height:100%;margin:0;cursor:pointer;z-index:1}.switch span{width:42px;height:24px;border-radius:12px;background:var(--line-strong);border:1px solid var(--line-strong);transition:background .15s}.switch span:after{content:"";display:block;background:#fff;width:16px;height:16px;margin:3px;border-radius:50%;transition:transform .15s}.switch input:checked+span{background:var(--accent);border-color:var(--accent)}.switch input:checked+span:after{transform:translateX(18px)}
+.operations{background:var(--surface-soft)}.operations .divider{border-top:1px solid var(--line);margin:12px 0 14px}.operations button{width:100%;margin:0 0 10px;justify-content:flex-start;text-align:left}.operations button:last-of-type{margin-bottom:0}.operations .primary{color:#06271f}.auto-refresh{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:18px;padding-top:15px;border-top:1px solid var(--line)}.auto-refresh strong{display:block;font-size:13px;color:var(--nav)}.auto-refresh small{display:block;margin-top:3px;color:var(--sub);font-size:11px;line-height:1.4}.interval-control{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;color:var(--sub);font-size:12px}.interval-control select{min-height:32px;padding:5px 8px;border:1px solid var(--line-strong);border-radius:4px;background:var(--surface);color:var(--text)}.hint{font-size:12px;color:var(--sub);margin:12px 0 0}.feedback{margin-top:14px;min-height:21px;color:var(--accent-dark);font-size:12px}.feedback.error{color:var(--danger)}.log-panel{max-width:1400px;margin:0 auto 18px}.bar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px}.bar h2{margin:0;color:var(--nav);font-size:19px}.bar p{margin:4px 0 0;color:var(--sub);font-size:12px}.bar button{min-height:36px}.bar-actions{display:flex;gap:8px;flex-wrap:wrap}.table-wrap{overflow-x:auto}.table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}.table th{font-weight:750;color:var(--nav);background:var(--surface-blue);padding:11px 12px;font-size:12px;border-bottom:1px solid var(--line)}.table td{padding:11px 12px;border-bottom:1px solid var(--line);color:var(--text);font-size:13px}.table td:last-child{color:var(--accent)}.table .empty{text-align:center;color:var(--sub);padding:34px}.secondary{color:var(--sub)!important}.request-preview{white-space:pre-wrap;overflow:auto;max-height:420px;max-width:100%;font-size:12px;word-break:break-word;background:var(--code-bg);border:1px solid var(--line);padding:14px;border-radius:4px}.footer{max-width:1400px;margin:22px auto 0;color:var(--muted);font-size:11px;text-align:right}
+#settings-view{display:none;max-width:1400px;margin:0 auto}#settings-view.active{display:block}#overview-view.hidden{display:none}.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.setting-card{border:1px solid var(--line);padding:18px;border-radius:5px;background:var(--surface-soft)}.setting-card strong{display:block;margin-bottom:7px;color:var(--nav)}.setting-card p{margin:0;color:var(--sub);font-size:13px}
+@media(max-width:1120px){.workspace{padding-inline:24px}.status{grid-template-columns:180px 1fr 1fr}.status-btn{grid-column:1/-1;padding:18px 0 0}.status-btn .primary{width:100%}.stat{padding:0 14px}.content-grid{grid-template-columns:1fr}.auth{grid-template-columns:auto minmax(150px,1fr) auto auto}.auth .helper{grid-column:1/-1}}
+@media(max-width:720px){.workspace{padding:22px 13px 30px}.top{margin-bottom:18px}.identity h1{font-size:25px}.identity .subtitle{font-size:12px}.auth{grid-template-columns:1fr auto;gap:10px;padding:14px}.auth>label:first-child{grid-column:1/-1}.auth input[type=password]{grid-column:1/-1;max-width:none}.auth .remember{grid-column:1}.auth #connect{grid-column:2;grid-row:3}.auth .helper{grid-column:1/-1}.view-switcher{margin-bottom:16px}.panel{padding:17px 15px}.status{grid-template-columns:1fr 1fr;gap:18px;padding-top:16px}.status-intro{grid-column:1/-1}.stat{padding:0;border:0}.stat label{font-size:11px}.stat strong{font-size:14px;white-space:normal}.status-btn{grid-column:1/-1;padding:0}.metrics{gap:18px;overflow:auto}.metric{min-width:max-content}.metrics .bar-actions{margin-left:0}.feature-head,.feature{grid-template-columns:35% 43% 22%}.feature-head span:nth-child(4),.feature span:nth-child(4){grid-column:3;grid-row:auto}.feature-head span:nth-child(3),.feature span:nth-child(3){display:none}.feature span:nth-child(2){font-size:11px}.feature{padding:8px;min-height:67px}.feature-head{padding:8px}.bar{display:block}.bar-actions{margin-top:12px}.settings-grid{grid-template-columns:1fr}.footer{text-align:left}}
 </style>
 </head>
 <body>
 <div class="app">
+  <div class="workspace">
   <header class="top">
-    <div class="identity">
-      <div class="symbol" aria-hidden="true"><svg viewBox="0 0 88 70"><circle cx="37" cy="31" r="26"/><path d="M11 31h45M37 5c-17 14-18 36 0 51M37 5c16 12 17 31 7 45M16 18h42"/><circle cx="59" cy="51" r="16" fill="#191713"/><path d="M59 41v11l8 5"/></svg></div>
-      <div><h1>Codex Chronos</h1><div class="subtitle">同步 Codex 请求时区与出口节点时区</div></div>
-    </div>
+    <div class="identity"><div><h1>Chronos Relay</h1><p class="subtitle">同步 Codex 请求时区与网络出口时区</p></div></div>
     <div class="toptools"><button class="square" id="top-refresh" title="刷新信息" aria-label="刷新信息"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5 9A8 8 0 0 1 19 7l1 5M4 12l1 5a8 8 0 0 0 14-2"/></svg></button></div>
   </header>
   <section class="auth" aria-label="管理接口连接">
     <label for="management-key">管理密钥</label><input id="management-key" type="password" autocomplete="off" placeholder="输入 CPA Management Key"/>
-    <button id="connect" class="outline" style="min-height:40px">连接</button>
-    <div id="connection" class="helper" role="status">优先复用 CPA Management 已记住的登录凭据。未启用记住密码时需重新输入；插件不另行存储密钥。</div>
+    <label class="remember" for="remember-key"><input id="remember-key" type="checkbox" checked>记住密码</label>
+    <button id="connect" class="primary">连接</button>
+    <div id="connection" class="helper" role="status">优先复用 CPA Management 已记住的凭据；勾选「记住密码」后本机浏览器会保存密钥并自动连接，未勾选则插件不保存密钥。</div>
   </section>
-  <div class="tabs" role="tablist" aria-label="管理面板">
+  <div class="view-switcher" role="tablist" aria-label="管理面板">
     <button class="tab" role="tab" aria-selected="true" data-view="overview">概览</button>
-    
-    
     <button class="tab" role="tab" aria-selected="false" data-view="settings">设置</button>
   </div>
   <main>
     <section id="overview-view">
       <div class="panel status">
+        <div class="status-intro"><h2>连接状态</h2><p>实时观察出口节点与校正引擎</p></div>
         <div class="stat"><label>同步状态</label><strong id="sync-state" class="muted">等待连接</strong></div>
         <div class="stat"><label>当前时区</label><strong id="zone">—</strong></div>
         <div class="stat"><label>出口时区偏移</label><strong id="offset">—</strong></div>
         <div class="stat"><label>出口 IP</label><strong id="ip">—</strong></div>
-        <div class="status-btn"><button class="gold" id="refresh"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M21 3v7h-7"/></svg>刷新状态</button></div>
+        <div class="status-btn"><button class="primary" id="refresh"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M21 3v7h-7"/></svg>刷新状态</button></div>
       </div>
       <div class="panel metrics" aria-label="请求校正统计">
-        <span>成功修改 <strong class="positive" id="count-success">—</strong></span>
-        <span>失败修改 <strong class="danger" id="count-failure">—</strong></span>
+        <span class="metric">成功修改 <strong class="positive" id="count-success">—</strong></span>
+        <span class="metric">失败修改 <strong class="danger" id="count-failure">—</strong></span>
         <div class="bar-actions"><button class="outline" id="clear-stats">清空统计</button></div>
       </div>
       <div class="content-grid">
-        <div class="panel">
-          <h2><span class="section-icon">⚙</span>核心功能</h2>
+        <section class="panel engine-panel">
+          <div class="panel-title"><div><h2><span class="section-icon"><svg viewBox="0 0 24 24"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/><circle cx="12" cy="12" r="3"/></svg></span>校正引擎</h2><p>每项能力都在同一条请求路径上工作</p></div></div>
           <div class="feature-head"><span>功能</span><span>说明</span><span>状态</span><span>启用</span></div>
           <div class="feature"><strong>启用时区同步</strong><span>将 Codex 请求时区与出口节点时区保持一致</span><span id="flag-sync" class="muted">—</span><label class="switch"><input id="toggle-sync" type="checkbox" disabled aria-label="启用时区同步"><span></span></label></div>
           <div class="feature"><strong>出口时区检测</strong><span>读取出口 IP 与 IANA 时区</span><span id="flag-state" class="muted">—</span><button id="probe-egress" class="outline" style="min-height:34px;padding:4px 12px">获取</button></div>
           <div class="feature"><strong>请求日期校正</strong><span>替换现有环境时区与日期，缺失时自动补入</span><span id="flag-rewrite" class="muted">—</span><span class="muted">随同步</span></div>
           <div class="feature"><strong>上游模型一致性</strong><span>只读比较入站请求与上游响应报告的模型</span><span class="positive">● 监测中</span><span class="muted">只读</span></div>
           <div class="feature"><strong>记录请求日志</strong><span>普通活动日志仅记录校正结果；失败请求单独保存</span><span id="flag-log" class="muted">—</span><label class="switch"><input id="toggle-log" type="checkbox" disabled aria-label="记录请求日志"><span></span></label></div>
-        </div>
-        <aside class="panel operations"><h2><span class="section-icon">🔧</span>操作</h2><div class="divider"></div>
-          <button class="gold" id="selftest"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>测试同步</button>
+        </section>
+        <aside class="panel operations"><div class="panel-title"><div><h2><span class="section-icon"><svg viewBox="0 0 24 24"><path d="m12 3 1.2 2.7 2.8.4-2 2 .5 2.8-2.5-1.4-2.5 1.4.5-2.8-2-2 2.8-.4zM5 14h14M7 18h10"/></svg></span>快捷操作</h2><p>安全地检查、刷新和保存当前设置</p></div></div><div class="divider"></div>
+          <button class="primary" id="selftest"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>测试同步</button>
           <button class="outline" id="refresh2"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5 9A8 8 0 0 1 19 7M5 17a8 8 0 0 0 14-2"/></svg>刷新信息</button>
           <button class="outline" id="save"><svg viewBox="0 0 24 24"><path d="M5 3h13l3 3v15H3V3zM7 3v7h10V3M7 21v-8h10v8"/></svg>保存设置</button>
+          <div class="auto-refresh"><div><strong>自动保鲜出口时区</strong><small id="auto-refresh-status">连接后按间隔自动更新状态文件</small></div><label class="switch"><input id="auto-refresh" type="checkbox" checked aria-label="自动保鲜出口时区"><span></span></label></div>
+          <label class="interval-control" for="refresh-interval">更新间隔<select id="refresh-interval"><option value="300">每 5 分钟</option><option value="900" selected>每 15 分钟</option><option value="1800">每 30 分钟</option><option value="3600">每 60 分钟</option></select></label>
           <p class="hint">测试同步是本地请求改写自检，不会发送真实 Codex 请求。</p>
           <p id="feedback" class="feedback" role="status" aria-live="polite"></p>
         </aside>
       </div>
-      <section class="panel log-panel"><div class="bar"><div><h2>最近活动 · 时区与模型监测</h2><p>显示协议、原始时区、校正时区及上游报告模型；未提供的数据标记为未知。</p></div><div class="bar-actions"><button class="outline" id="refresh-activity">刷新活动</button><button class="outline" id="clear-activity">清空</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>协议</th><th>校正前时区</th><th>校正后时区</th><th>请求模型</th><th>上游模型</th><th>状态</th></tr></thead><tbody id="recent-body"><tr><td colspan="7" class="empty">连接后显示活动</td></tr></tbody></table></div></section>
-      <section class="panel log-panel"><div class="bar"><div><h2>校正失败日志</h2><p>只保存校正失败的 Codex 请求体。可能包含完整提示词等敏感内容，请限制管理密钥及日志文件的访问权限。</p></div><div class="bar-actions"><button class="outline" id="refresh-failures">刷新失败日志</button><button class="outline" id="clear-failures">清空失败日志</button></div></div>
+      <section id="activity-panel" class="panel log-panel"><div class="bar"><div><h2>最近活动</h2><p>时区校正与上游模型监测记录</p></div><div class="bar-actions"><button class="outline" id="refresh-activity">刷新活动</button><button class="outline" id="clear-activity">清空</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>协议</th><th>校正前时区</th><th>校正后时区</th><th>请求模型</th><th>上游模型</th><th>状态</th></tr></thead><tbody id="recent-body"><tr><td colspan="7" class="empty">连接后显示活动</td></tr></tbody></table></div></section>
+      <section id="failure-panel" class="panel log-panel"><div class="bar"><div><h2>失败记录</h2><p>只保存校正失败的 Codex 请求体，查看前不会读取完整内容。</p></div><div class="bar-actions"><button class="outline" id="refresh-failures">刷新失败日志</button><button class="outline" id="clear-failures">清空失败日志</button></div></div>
         <div class="table-wrap"><table class="table"><thead><tr><th>时间</th><th>协议</th><th>失败原因</th><th>请求大小</th><th>请求详情</th></tr></thead><tbody id="failure-body"><tr><td colspan="5" class="empty">连接后显示失败日志</td></tr></tbody></table></div>
         <p id="failure-description" class="hint">点击“查看”后才会读取完整请求体。</p><pre id="failure-json" class="request-preview" hidden></pre>
       </section>
     </section>
-    <section id="settings-view" class="panel"><h2>设置说明</h2><div class="settings-grid"><div class="setting-card"><strong>生效方式</strong><p>在「概览」修改开关后点击「保存设置」，配置立即生效，不需要重启 CPA。</p></div><div class="setting-card"><strong>出口时区来源</strong><p>定时任务及手动获取均由服务器宿主机通过 Mihomo 探测，手动获取需要刷新辅助服务运行。</p></div><div class="setting-card"><strong>日志与隐私</strong><p>普通活动记录不保存提示词；失败日志独立保存完整 Codex 请求体（可能含敏感信息），权限为 0600，单文件上限 48 MiB。</p></div><div class="setting-card"><strong>状态有效期</strong><p>检测记录超过两小时将被视为过期，插件暂停注入，以免使用错误时区。</p></div></div></section>
+    <section id="settings-view" class="panel"><div class="panel-title"><div><h2>设置说明</h2><p>了解生效方式、数据来源与保留策略</p></div></div><div class="settings-grid"><div class="setting-card"><strong>生效方式</strong><p>在「概览」修改开关后点击「保存设置」，配置立即生效，不需要重启 CPA。</p></div><div class="setting-card"><strong>出口时区来源</strong><p>插件会读取出口 IP 对应的 IANA 时区；打开自动保鲜后，面板会按设定间隔保存最新状态。</p></div><div class="setting-card"><strong>日志与隐私</strong><p>普通活动记录不保存提示词；失败日志独立保存完整 Codex 请求体（可能含敏感信息），权限为 0600，单文件上限 48 MiB。</p></div><div class="setting-card"><strong>状态有效期</strong><p>检测记录超过两小时将被视为过期，插件暂停注入，以免使用错误时区。</p></div></div></section>
   </main>
   <div class="footer" id="updated">未连接管理接口</div>
   <div class="footer muted" id="data-dir"></div>
+</div>
 </div>
 <script>
 'use strict';
 (() => {
   const path='/v0/management/plugins/codex-chronos/';
   const $=id=>document.getElementById(id);
+  // The panel's own "remember password" store. Kept separate from the CPA
+  // console key (cli-proxy-auth) so the plugin never rewrites host state.
+  const AUTH_KEY='codex-chronos-auth';
+  // Same masking the console applies to its own saved credential: obfuscation
+  // bound to this origin and user agent, not encryption. Only ever readable
+  // by scripts running on this exact origin.
+  const maskBytes=()=>new TextEncoder().encode('cli-proxy-api-webui::secure-storage|'+location.host+'|'+navigator.userAgent);
+  const AUTO_REFRESH_KEY='codex-chronos-auto-refresh';
+  const AUTO_INTERVAL_KEY='codex-chronos-refresh-interval';
+  function encodeSecret(value){
+    const key=maskBytes(),bytes=new TextEncoder().encode(value);
+    let raw='';for(let i=0;i<bytes.length;i++)raw+=String.fromCharCode(bytes[i]^key[i%key.length]);
+    return 'enc::v1::'+btoa(raw);
+  }
+  function decodeSecret(stored){
+    if(!stored)return '';
+    if(!stored.startsWith('enc::v1::'))return stored;
+    const key=maskBytes(),bytes=Uint8Array.from(atob(stored.slice(9)),c=>c.charCodeAt(0));
+    return new TextDecoder('utf-8',{fatal:true}).decode(bytes.map((b,i)=>b^key[i%key.length]));
+  }
+  function readStore(key){
+    try{return localStorage.getItem(key)||'';}catch{return '';}
+  }
+  function writeStore(key,value){
+    try{
+      if(value)localStorage.setItem(key,value);
+      else if(localStorage.removeItem)localStorage.removeItem(key);
+      else localStorage.setItem(key,'');
+    }catch{}
+  }
+  function savedPluginKey(){
+    try{return decodeSecret(readStore(AUTH_KEY));}catch{return '';}
+  }
+  function rememberPluginKey(value,remember){
+    writeStore(AUTH_KEY,remember&&value?encodeSecret(value):'');
+  }
   function savedManagementKey(){
     try {
       const stored=localStorage.getItem('cli-proxy-auth');if(!stored)return '';
-      let decoded=stored;
-      if(stored.startsWith('enc::v1::')){
-        const bytes=Uint8Array.from(atob(stored.slice(9)),c=>c.charCodeAt(0));
-        const password=new TextEncoder().encode('cli-proxy-api-webui::secure-storage|'+location.host+'|'+navigator.userAgent);
-        decoded=new TextDecoder('utf-8',{fatal:true}).decode(bytes.map((b,i)=>b^password[i%password.length]));
-      }
+      const decoded=decodeSecret(stored);
       const value=JSON.parse(decoded);const state=value?.state;
       return state?.rememberPassword===true && typeof state.managementKey==='string'?state.managementKey:'';
     } catch{return '';}
@@ -114,6 +172,8 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
   let models={matched:0,mismatched:0,unknown:0,records:[]};
   let stats={success:0,failure:0};
   let failures=[];
+  let autoTimer=null;
+  let autoRefreshing=false;
   const select=(name,on)=>{const node=$(name);node.textContent=on?'● 正常':'● 关闭';node.className=on?'positive':'muted';};
   function feedback(message,error=false) {const node=$('feedback');node.textContent=message;node.className=error?'feedback error':'feedback';}
   async function api(endpoint,method='GET',data=null) {
@@ -206,10 +266,65 @@ svg{width:22px;height:22px;vertical-align:middle;fill:none;stroke:currentColor;s
       $('connection').textContent='● 已连接 CPA 管理接口';$('connection').className='helper connected';
     } catch(err){feedback(err.message,true);throw err;}
   }
+  function intervalLabel(seconds){return seconds<3600?`每 ${Math.round(seconds/60)} 分钟`:`每 ${Math.round(seconds/3600)} 小时`;}
+  function scheduleAutoRefresh(){
+    if(autoTimer){clearInterval(autoTimer);autoTimer=null;}
+    const enabled=$('auto-refresh').checked;
+    const seconds=Number($('refresh-interval').value)||900;
+    const label=$('auto-refresh-status');
+    if(!enabled){label.textContent='已暂停自动更新';return;}
+    label.textContent=managementKey?`${intervalLabel(seconds)}自动保存出口时区`:'连接后按间隔自动更新状态文件';
+    if(!managementKey)return;
+    autoTimer=setInterval(()=>guarded(async()=>{
+      if(autoRefreshing)return;
+      autoRefreshing=true;
+      try{
+        await api('egress/refresh','POST');
+        await refresh();
+        feedback('出口时区已自动保存');
+      }finally{autoRefreshing=false;}
+    }),seconds*1000);
+  }
   async function guarded(action){try{await action();}catch(err){feedback(err.message,true);}}
-  $('connect').addEventListener('click',()=>guarded(async()=>{managementKey=$('management-key').value.trim();await refresh();$('management-key').value='';}));
-  const savedKey=savedManagementKey();
-  if(savedKey){managementKey=savedKey;guarded(refresh);}
+  $('connect').addEventListener('click',()=>guarded(async()=>{
+    const candidate=$('management-key').value.trim();
+    if(candidate)managementKey=candidate;
+    if(!managementKey)throw new Error('请输入管理密钥');
+    await refresh();
+    rememberPluginKey(managementKey,$('remember-key').checked);
+    $('management-key').value='';
+    scheduleAutoRefresh();
+  }));
+  $('remember-key').addEventListener('change',()=>{
+    rememberPluginKey(managementKey,$('remember-key').checked);
+    feedback($('remember-key').checked?'已记住密码，下次自动连接':'已取消记住密码');
+  });
+  $('auto-refresh').checked=readStore(AUTO_REFRESH_KEY)!=='false';
+  const storedInterval=readStore(AUTO_INTERVAL_KEY);
+  if(['300','900','1800','3600'].includes(storedInterval))$('refresh-interval').value=storedInterval;
+  $('auto-refresh').addEventListener('change',()=>{
+    writeStore(AUTO_REFRESH_KEY,String($('auto-refresh').checked));
+    scheduleAutoRefresh();
+    if($('auto-refresh').checked&&managementKey)guarded(async()=>{
+      await api('egress/refresh','POST');
+      await refresh();
+      feedback('自动保鲜已开启，出口时区已更新');
+    });
+  });
+  $('refresh-interval').addEventListener('change',()=>{
+    writeStore(AUTO_INTERVAL_KEY,$('refresh-interval').value);
+    scheduleAutoRefresh();
+    feedback(`自动更新频率：${intervalLabel(Number($('refresh-interval').value))}`);
+  });
+  // Prefer the panel's own remembered key; fall back to the credential the CPA
+  // console already remembers (its "记住密码"), which needs no new storage.
+  const storedKey=savedPluginKey();
+  const savedKey=storedKey||savedManagementKey();
+  if(savedKey){
+    managementKey=savedKey;
+    if(storedKey)$('remember-key').checked=true;
+    guarded(async()=>{await refresh();scheduleAutoRefresh();});
+  }
   $('management-key').addEventListener('keydown',e=>{if(e.key==='Enter')$('connect').click();});
   for(const id of ['refresh','refresh2','top-refresh','refresh-activity'])$(id).addEventListener('click',()=>guarded(refresh));
   $('clear-activity').addEventListener('click',()=>guarded(async()=>{

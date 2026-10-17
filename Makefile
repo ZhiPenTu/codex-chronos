@@ -10,10 +10,12 @@ CFLAGS += -fPIC -fstack-protector-strong
 ifeq ($(shell uname -s),Darwin)
 LIB := codex-chronos.dylib
 LDFLAGS := -dynamiclib -pthread
-# Some macOS SDKs (27+) list arm64e slices that older ld64 cannot parse.
-# Try the default SDK first; on failure retry with older installed SDKs,
-# newest first. No effect on healthy toolchains.
-DARWIN_SDKS := $(shell ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX*.sdk 2>/dev/null | sort -r)
+# Some new SDKs list arm64e slices that an older ld64 cannot parse. Try the
+# default toolchain first; on failure retry with each distinct installed SDK,
+# newest first. Resolve symlinks so aliases such as MacOSX.sdk and MacOSX27.sdk
+# do not make the same broken SDK get retried repeatedly. No effect on healthy
+# toolchains.
+DARWIN_SDKS := $(shell { for sdk in /Library/Developer/CommandLineTools/SDKs/MacOSX*.sdk /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX*.sdk; do [ -d "$$sdk" ] && (cd "$$sdk" && pwd -P); done; } 2>/dev/null | sort -r -u)
 else
 LIB := codex-chronos.so
 LDFLAGS := -pthread -shared

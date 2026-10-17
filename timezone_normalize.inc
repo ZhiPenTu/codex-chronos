@@ -8,7 +8,7 @@ static const char *find_ci(const char *hay,const char *needle) {
 }
 static char *text_replace(char *old,size_t pos,size_t remove,const char *add,size_t addlen) {
   size_t n=strlen(old),newlen=0;
-  char *next=splice(old,n,pos,remove,add,addlen,&newlen);
+  char *next=json_splice(old,n,pos,remove,add,addlen,&newlen);
   if(next)free(old);
   return next;
 }
@@ -195,7 +195,7 @@ static int normalize_existing_environments(const char *payload,size_t len,char *
       size_t at=(size_t)t.start-1,oldlen=(size_t)(t.end-t.start)+2,enc_len=strlen(encoded);
       if(oldlen!=enc_len||memcmp(current+at,encoded,oldlen)!=0){
         size_t next_len=0;
-        char *next=splice(current,length,at,oldlen,encoded,enc_len,&next_len);
+        char *next=json_splice(current,length,at,oldlen,encoded,enc_len,&next_len);
         if(!next){free(encoded);free(current);free(ts);return -1;}
         free(current);current=next;length=next_len;changed=1;
       }
