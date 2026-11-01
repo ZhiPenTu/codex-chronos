@@ -28,7 +28,7 @@ cd codex-chronos
 make                      # 生成 codex-chronos.dylib / .so / .dll
 ```
 
-把编译出的动态库放进 CPA 的插件目录（桌面客户端一般在「插件」页安装，或放入 `plugins/` 目录），其余全部自动：
+把编译出的动态库放进 CPA 的插件目录（桌面客户端一般在「插件」页安装，或放入 `plugins/` 目录）。动态库已内置 `refresh_egress.py`，无需单独下载或安装脚本；主机仍需 Python 3.9+（含 `zoneinfo`，Windows 还需安装 `tzdata`）。
 
 - **数据目录自动定位**（状态、统计、日志、失败记录、刷新 Socket）：
 
@@ -52,7 +52,7 @@ make                      # 生成 codex-chronos.dylib / .so / .dll
 3. **面板自动保鲜**：管理面板连接后默认每 15 分钟调用一次 `egress/refresh`，把最新出口 IP、IANA 时区、UTC 偏移和日期写入状态文件；可在「快捷操作」中暂停或调整为 5 / 15 / 30 / 60 分钟。该设置仅保存在当前浏览器，不保存管理密钥以外的服务端配置。
 4. **常驻服务（可选）**：`python3 refresh_egress.py --serve` 常驻时，Socket 通道响应更快，且自带周期刷新。不运行时前三层完全兜底，**时区状态最长 2 小时内仍然有效（fail-open），不会阻断任何请求**。
 
-助手脚本查找顺序：`CODEX_TZ_HELPER` 环境变量 > 数据目录 > 插件库所在目录 > EasyCLIProxyAPI 应用数据目录 > `~/.codex-chronos/` > `/usr/local/lib/codex-chronos/`。解释器查找：`CODEX_TZ_PYTHON` > `/usr/bin/python3` > PATH。
+助手脚本查找顺序：`CODEX_TZ_HELPER` 环境变量 > 数据目录 > 插件库所在目录 > EasyCLIProxyAPI 应用数据目录 > `~/.codex-chronos/` > `/usr/local/lib/codex-chronos/` > 内置脚本。没有外部脚本时，插件将内置内容原子释放到数据目录中的 `refresh_egress-<SHA256>.py`，保留手动安装脚本的优先级；脚本随动态库构建，内容变化后使用新文件，损坏的副本会自动修复。数据目录必须可写。解释器查找：`CODEX_TZ_PYTHON` > 系统常见 Python 路径 > PATH。内置脚本使用插件实际生效的状态文件路径，包含插件配置的 `data_dir` 和 `CODEX_TZ_STATE_FILE` 覆盖。
 
 ## 从 CPA 插件商店安装
 
@@ -75,11 +75,11 @@ plugins:
       data_dir: ""   # 可选：自定义数据目录；留空自动定位
 ```
 
-从插件商店安装后确保单插件开关打开，并检查日志中插件已注册。Release 提供 `linux_amd64`、`linux_arm64`、`darwin_amd64`、`darwin_arm64`、`windows_amd64` 五种动态库 ZIP（分别含 `.so`、`.dylib`、`.dll`）和 `checksums.txt`。插件商店只安装动态库，**不会自动安装主机端出口时区检测辅助服务**，参阅下一节。
+从插件商店安装后确保单插件开关打开，并检查日志中插件已注册。Release 提供 `linux_amd64`、`linux_arm64`、`darwin_amd64`、`darwin_arm64`、`windows_amd64` 五种动态库 ZIP（分别含 `.so`、`.dylib`、`.dll`）和 `checksums.txt`。插件商店只需安装动态库，**检测脚本已随动态库内置，按需自动释放并启动，无需单独安装辅助服务**；Python 运行时仍需主机提供，参阅下一节。
 
 ## 出口时区检测与手动刷新
 
-插件需要一个定期更新的状态文件。**桌面与容器使用同一套定位规则**：先看环境变量，再看 `/CLIProxyAPI/data` 是否存在（存在即容器默认），否则落到用户数据目录。状态格式（由附带的 Python 辅助脚本生成）：
+插件需要一个定期更新的状态文件。**桌面与容器使用同一套定位规则**：先看环境变量，再看 `/CLIProxyAPI/data` 是否存在（存在即容器默认），否则落到用户数据目录。状态格式（由内置或手动安装的 Python 辅助脚本生成）：
 
 ```text
 America/Los_Angeles|2026-10-12|PDT|-07:00
@@ -120,13 +120,13 @@ python3 refresh_egress.py --serve
 | `CODEX_TZ_HELPER` | 插件 | 按需拉起时使用的 `refresh_egress.py` 路径 |
 | `CODEX_TZ_PYTHON` | 插件 | 按需拉起时使用的 Python 解释器路径 |
 
-插件侧也可在 CPA 插件配置中设置 `data_dir`（管理端/桌面客户端插件页渲染为表单），效果等同于 `CODEX_TZ_DATA_DIR`；辅助脚本请设置相同的 `CODEX_TZ_DATA_DIR`，两边才会落到同一目录。
+插件侧也可在 CPA 插件配置中设置 `data_dir`（管理端/桌面客户端插件页渲染为表单），效果等同于 `CODEX_TZ_DATA_DIR`；插件自动启动的内置脚本会使用相同的状态文件路径；手动运行脚本或常驻服务时，请设置相同的 `CODEX_TZ_DATA_DIR`。
 
 ### macOS / Windows 补充说明
 
 macOS 与 Linux 一样使用 Unix Domain Socket 进行手动「获取」。Windows 系统的 Python 不支持 Unix Socket，因此 Windows DLL 与 `refresh_egress.py --serve` 通过 CPA 数据目录中的文件请求/应答信箱通信：`<CODEX_TZ_REFRESH_SOCKET>.ready`、`.request`、`.<nonce>.reply`。只传递随机请求标识与 OK/ERR 状态，**不会把用户请求正文放入信箱**。Windows 主机必须确保共享目录仅允许可信管理员和 CPA 账户读写（NTFS ACL），并用 `python -m pip install tzdata` 安装 IANA 时区数据。
 
-在 Windows/macOS 上，即使只有动态库而没有运行探测辅助脚本，管理界面的「获取」也会由插件按需拉起助手完成检测（v0.7.0 起）；找不到助手时会给出数据目录与 `CODEX_TZ_HELPER` 提示。通过外部定时任务生成的有效状态文件同样可供时区改写使用。
+在 Windows/macOS 上，即使只有动态库而没有运行探测辅助脚本，管理界面的「获取」也会由插件按需拉起助手完成检测（v0.7.0 起）；内置脚本无法释放或启动时会提示检查数据目录权限与 Python 运行时。通过外部定时任务生成的有效状态文件同样可供时区改写使用。
 
 ## 管理界面与数据安全
 
@@ -138,7 +138,7 @@ macOS 与 Linux 一样使用 Unix Domain Socket 进行手动「获取」。Windo
 
 **失败请求日志可能包含提示词、文件内容和其他敏感数据。** 插件会保存完整的失败 Codex *请求体*，不保存外围 HTTP Headers、OAuth Cookie 或代理转发封装；但如果请求体中原本带有秘密，仍会一并保存。日志默认在持久化目录中以 `0600` 权限创建，具有大小上限。不要公开数据目录、不要将数据文件加入 Git 或备份到公开存储。
 
-支持的存储位置覆盖：`CODEX_TZ_CONFIG_FILE`、`CODEX_TZ_LOG_FILE`、`CODEX_TZ_STATE_FILE`、`CODEX_TZ_STATS_FILE`、`CODEX_TZ_FAILURE_FILE`。上述配置作用于 CPA 插件进程，与辅助脚本使用的 `CODEX_TZ_STATE` 是不同的环境变量。
+支持的存储位置覆盖：`CODEX_TZ_CONFIG_FILE`、`CODEX_TZ_LOG_FILE`、`CODEX_TZ_STATE_FILE`、`CODEX_TZ_STATS_FILE`、`CODEX_TZ_FAILURE_FILE`。`CODEX_TZ_STATE_FILE` 同时作用于插件与辅助脚本；辅助脚本也兼容 `CODEX_TZ_STATE`，两者同时设置时以前者为准。
 
 ## 源码编译与测试
 
@@ -150,7 +150,7 @@ make test
 python3 test_egress.py
 ```
 
-包含 48 项 C ABI/管理接口/改写行为/桌面路径测试及 17 项出口检测辅助脚本测试。浏览器测试可按需执行 `python3 test_ui.py`、`python3 test_auth_ui.py`（需 Chrome/Chromium 和 Playwright），覆盖公共主题回退、记住密码和自动刷新出口时区。
+包含 48 项 C ABI/管理接口/改写行为/桌面路径测试、10 项内置脚本安装与刷新回归测试及 18 项出口检测辅助脚本测试。浏览器测试可按需执行 `python3 test_ui.py`、`python3 test_auth_ui.py`（需 Chrome/Chromium 和 Playwright），覆盖公共主题回退、记住密码和自动刷新出口时区。
 
 > macOS 备注：个别新版 SDK（27+）的 `libSystem.B.tbd` 含有旧版 `ld64` 不认识的 `arm64e.x1` 架构，直接链接会报 `tapi error`。Makefile 已内置回退：默认 SDK 链接失败时自动改用本机较旧 SDK 重试，通常无需人工干预。
 
@@ -169,6 +169,6 @@ ZIP 根目录仅包含 `codex-chronos.so`，符合 CPA 插件商店直装约定�
 
 ## 兼容性与限制
 
-本插件面向 CLIProxyAPI 内置 C ABI 插件宿主，不适用于不支持插件的旧版 CPA。不同 CPA 分支对管理界面、拦截器回调及插件商店的支持可能不同；请使用支持动态插件及对应管理接口的版本。桌面部署需要手动把编译产物放入 CPA 插件目录，并运行辅助脚本；插件不是地理位置伪装工具，不提供 OAuth 凭据，也不向第三方转发完整请求体。
+本插件面向 CLIProxyAPI 内置 C ABI 插件宿主，不适用于不支持插件的旧版 CPA。不同 CPA 分支对管理界面、拦截器回调及插件商店的支持可能不同；请使用支持动态插件及对应管理接口的版本。桌面部署只需安装动态库并准备 Python 运行时，内置辅助脚本由插件按需启动；插件不是地理位置伪装工具，不提供 OAuth 凭据，也不向第三方转发完整请求体。
 
 当前仓库没有明确授予代码再分发许可；使用前请遵守适用法律及上游服务条款。

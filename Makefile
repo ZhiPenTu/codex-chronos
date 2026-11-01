@@ -23,7 +23,7 @@ endif
 endif
 
 all: $(LIB)
-dashboard_bundle.h: dashboard.html embed_ui.py
+dashboard_bundle.h: dashboard.html refresh_egress.py embed_ui.py
 	$(PYTHON) embed_ui.py
 $(LIB): plugin.c settings.inc events.inc stats.inc refresh_bridge.inc failures.inc timezone_normalize.inc model_monitor.inc paths.inc spawn_refresh.inc platform_compat.h dashboard_bundle.h
 ifdef DARWIN_SDKS
@@ -41,6 +41,7 @@ else
 endif
 test: all
 	$(PYTHON) test_plugin.py
+	$(PYTHON) test_embedded.py
 clean:
 	rm -f codex-chronos.so codex-chronos.dylib codex-chronos.dll dashboard_bundle.h
 .PHONY: all clean test

@@ -114,9 +114,67 @@ static int tz_library_dir(char *out,size_t cap) {
 #endif
 }
 
+static int tz_embedded_matches(const char *path) {
+  int fd=open(path,O_RDONLY|O_NOFOLLOW);
+  if(fd<0)return 0;
+  struct stat st;
+  int ok=fstat(fd,&st)==0 && S_ISREG(st.st_mode) &&
+    st.st_size==(long long)sizeof(refresh_helper);
+  unsigned char buf[4096];
+  size_t offset=0;
+  while(ok && offset<sizeof(refresh_helper)) {
+    size_t remaining=sizeof(refresh_helper)-offset;
+    size_t count=remaining<sizeof(buf)?remaining:sizeof(buf);
+    ssize_t got=read(fd,buf,count);
+    if(got<0 && errno==EINTR)continue;
+    if(got<=0 || memcmp(buf,refresh_helper+offset,(size_t)got))ok=0;
+    else offset+=(size_t)got;
+  }
+  close(fd);
+  return ok;
+}
+
+static int tz_embedded_helper(char *out,size_t cap) {
+  static plugin_mutex_t mutex=PLUGIN_MUTEX_INITIALIZER;
+  char dir[CODEX_TZ_PATH_CAP],temporary[CODEX_TZ_PATH_CAP];
+  snprintf(dir,sizeof(dir),"%s",tz_data_dir());
+  if(!dir[0] || tz_path_build(out,cap,dir,refresh_helper_name,NULL,NULL)!=0 ||
+     tz_path_build(temporary,sizeof(temporary),dir,".refresh-XXXXXX",NULL,NULL)!=0)return 0;
+  plugin_mutex_lock(&mutex);
+  if(tz_embedded_matches(out)) {
+    plugin_mutex_unlock(&mutex);
+    return 1;
+  }
+  int ok=tz_ensure_dir(dir)==0;
+  int fd=ok?mkstemp(temporary):-1;
+  ok=fd>=0;
+  size_t offset=0;
+  while(ok && offset<sizeof(refresh_helper)) {
+    ssize_t written=write(fd,refresh_helper+offset,sizeof(refresh_helper)-offset);
+    if(written<0 && errno==EINTR)continue;
+    if(written<=0)ok=0;
+    else offset+=(size_t)written;
+  }
+  if(fd>=0) {
+    if(ok && fsync(fd)!=0)ok=0;
+    if(close(fd)!=0)ok=0;
+    if(ok) {
+#ifdef _WIN32
+      ok=MoveFileExA(temporary,out,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+#else
+      ok=rename(temporary,out)==0;
+#endif
+    }
+    if(!ok)unlink(temporary);
+  }
+  plugin_mutex_unlock(&mutex);
+  return ok;
+}
+
 // First existing refresh_egress.py, or NULL when none of the candidates
 // exists. The result points at a static buffer valid until the next call.
-static const char *tz_helper_script(void) {
+static const char *tz_helper_script(int *embedded) {
+  *embedded=0;
   static char out[CODEX_TZ_PATH_CAP];
   const char *env=getenv("CODEX_TZ_HELPER");
   if(env && *env && strlen(env)<sizeof(out) && tz_file_exists(env)) {
@@ -151,6 +209,10 @@ static const char *tz_helper_script(void) {
   }
   if(tz_path_build(out,sizeof(out),"/usr/local/lib",CODEX_TZ_DIRNAME,
        CODEX_TZ_HELPER_SCRIPT,NULL)==0 && tz_file_exists(out))return out;
+  if(tz_embedded_helper(out,sizeof(out))) {
+    *embedded=1;
+    return out;
+  }
   return NULL;
 }
 
@@ -216,13 +278,18 @@ static const char *tz_python_absolute(void) {
 
 // Fill argv for spawning the helper. Returns 1 on success.
 static int tz_helper_argv(char **argv,size_t cap) {
-  const char *script=tz_helper_script();
-  if(!script||cap<3)return 0;
+  int embedded=0;
+  const char *script=tz_helper_script(&embedded);
+  if(!script||cap<5)return 0;
   const char *python=tz_python_absolute();
   if(python) {
     argv[0]=(char *)python;
     argv[1]=(char *)script;
-    argv[2]=NULL;
+    argv[2]=embedded?"--state-file":NULL;
+    if(embedded) {
+      argv[3]=(char *)tz_state_path();
+      argv[4]=NULL;
+    }
     return 1;
   }
   // No interpreter found: the script may still be directly executable.
@@ -285,14 +352,17 @@ static void tz_win_quote(char *dst,size_t cap,const char *src) {
 
 // Start the helper, appending its stdout/stderr to <data_dir>/helper.log.
 // wait != 0 blocks up to timeout_seconds and reports the exit status.
-static int tz_win_run(const char *exe,const char *script,const char *logpath,
+static int tz_win_run(char *const argv[],const char *logpath,
                       int wait,long timeout_seconds) {
-  char exe_arg[CODEX_TZ_PATH_CAP*2+8],script_arg[CODEX_TZ_PATH_CAP*2+8];
-  char command[CODEX_TZ_PATH_CAP*4+16];
-  tz_win_quote(exe_arg,sizeof(exe_arg),exe);
-  tz_win_quote(script_arg,sizeof(script_arg),script);
-  int n=snprintf(command,sizeof(command),"%s %s",exe_arg,script_arg);
-  if(n<=0||(size_t)n>=sizeof(command))return -1;
+  char argument[CODEX_TZ_PATH_CAP*2+8],command[CODEX_TZ_PATH_CAP*8+64];
+  size_t used=0;
+  command[0]=0;
+  for(size_t i=0;argv[i];i++) {
+    tz_win_quote(argument,sizeof(argument),argv[i]);
+    int n=snprintf(command+used,sizeof(command)-used,"%s%s",i?" ":"",argument);
+    if(n<0 || (size_t)n>=sizeof(command)-used)return -1;
+    used+=(size_t)n;
+  }
 
   SECURITY_ATTRIBUTES attrs={sizeof(attrs),NULL,TRUE};
   HANDLE log=CreateFileA(logpath,FILE_APPEND_DATA,
@@ -311,7 +381,7 @@ static int tz_win_run(const char *exe,const char *script,const char *logpath,
   PROCESS_INFORMATION process;
   memset(&process,0,sizeof(process));
   // CREATE_NO_WINDOW: no console flash from a GUI-hosted CPA process.
-  BOOL started=CreateProcessA(exe,command,
+  BOOL started=CreateProcessA(argv[0],command,
     have_log?&attrs:NULL,have_log?&attrs:NULL,have_log?TRUE:FALSE,
     CREATE_NO_WINDOW,NULL,NULL,&info,&process);
   if(have_log)CloseHandle(log);
@@ -338,13 +408,13 @@ static int tz_win_run(const char *exe,const char *script,const char *logpath,
 // Run refresh_egress.py once and wait for it. 0 = exited 0,
 // 1 = ran but failed (or timed out), -1 = could not be started.
 static int tz_refresh_once(long timeout_seconds) {
-  char *argv[3];
-  if(!tz_helper_argv(argv,3))return -1;
+  char *argv[5];
+  if(!tz_helper_argv(argv,5))return -1;
   const char *dir=tz_data_dir();
   if(dir && *dir)tz_ensure_dir(dir);
   char logpath[CODEX_TZ_PATH_CAP];
   snprintf(logpath,sizeof(logpath),"%s",tz_join("helper.log"));
-  int rc=tz_win_run(argv[0],argv[1]?argv[1]:"",logpath,1,timeout_seconds);
+  int rc=tz_win_run(argv,logpath,1,timeout_seconds);
   if(rc<0)tz_helper_log("on-demand refresh: spawn failed");
   else if(rc==0)tz_helper_log("on-demand refresh: completed");
   else tz_helper_log("on-demand refresh: helper failed");
@@ -353,21 +423,21 @@ static int tz_refresh_once(long timeout_seconds) {
 
 // Fire-and-forget: the helper runs detached and is never waited for.
 static void tz_refresh_background(void) {
-  char *argv[3];
-  if(!tz_helper_argv(argv,3))return;
+  char *argv[5];
+  if(!tz_helper_argv(argv,5))return;
   const char *dir=tz_data_dir();
   if(dir && *dir)tz_ensure_dir(dir);
   char logpath[CODEX_TZ_PATH_CAP];
   snprintf(logpath,sizeof(logpath),"%s",tz_join("helper.log"));
-  tz_win_run(argv[0],argv[1]?argv[1]:"",logpath,0,0);
+  tz_win_run(argv,logpath,0,0);
 }
 #else
 // Run refresh_egress.py once and wait for it.
 // Returns 0 when it exited 0, 1 when it ran but failed (or timed out),
 // -1 when it could not be spawned (helper script or interpreter missing).
 static int tz_refresh_once(long timeout_seconds) {
-  char *argv[3];
-  if(!tz_helper_argv(argv,3))return -1;
+  char *argv[5];
+  if(!tz_helper_argv(argv,5))return -1;
   const char *dir=tz_data_dir();
   if(dir && *dir)tz_ensure_dir(dir);
   char logpath[CODEX_TZ_PATH_CAP];
@@ -411,8 +481,8 @@ static int tz_refresh_once(long timeout_seconds) {
 // here; the grandchild is reparented to launchd, so no zombie accumulates.
 // Only async-signal-safe calls run between fork and exec.
 static void tz_refresh_background(void) {
-  char *argv[3];
-  if(!tz_helper_argv(argv,3))return;
+  char *argv[5];
+  if(!tz_helper_argv(argv,5))return;
   const char *dir=tz_data_dir();
   if(dir && *dir)tz_ensure_dir(dir);
   char logpath[CODEX_TZ_PATH_CAP];

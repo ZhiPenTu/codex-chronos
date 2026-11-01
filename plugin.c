@@ -20,9 +20,9 @@
 #include <sys/stat.h>
 #include "platform_compat.h"
 #include "paths.inc"
+#include "dashboard_bundle.h"
 #include "spawn_refresh.inc"
 static void derive_local_date(char *date,size_t cap,const char *offset);
-#include "dashboard_bundle.h"
 
 #define ABI_VERSION 1
 #define MAX_REQUEST (12u * 1024u * 1024u)

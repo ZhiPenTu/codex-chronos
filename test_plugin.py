@@ -68,6 +68,7 @@ def bind_library(lib_path):
         finally:
             api.free_buffer(response.ptr, response.len)
 
+    call._library = lib
     return api, call
 
 LIB_PATH = ROOT / ('codex-chronos.dll' if sys.platform == 'win32' else 'codex-chronos.dylib' if sys.platform == 'darwin' else 'codex-chronos.so')
@@ -102,6 +103,8 @@ class TestTimezonePlugin(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
+        cls.saved_data_dir = os.environ.get('CODEX_TZ_DATA_DIR')
+        os.environ['CODEX_TZ_DATA_DIR'] = cls.temp.name
         cls.path = pathlib.Path(cls.temp.name) / 'timezone.state'
         cls.path.write_text('America/Los_Angeles|2026-10-11|PDT|-07:00\n66.92.223.4\n')
         os.environ['CODEX_TZ_STATE_FILE'] = str(cls.path)
@@ -134,6 +137,10 @@ class TestTimezonePlugin(unittest.TestCase):
                     'CODEX_TZ_HELPER','CODEX_TZ_PYTHON','TZ_TEST_COUNTER',
                     'TZ_TEST_WRITE_STATE','CODEX_TZ_REFRESH_INTERVAL'):
             os.environ.pop(key, None)
+        if cls.saved_data_dir is None:
+            os.environ.pop('CODEX_TZ_DATA_DIR', None)
+        else:
+            os.environ['CODEX_TZ_DATA_DIR'] = cls.saved_data_dir
         cls.temp.cleanup()
 
     def test_register(self):

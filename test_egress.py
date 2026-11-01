@@ -69,6 +69,11 @@ class TestHostEgress(unittest.TestCase):
 class TestDesktopPaths(unittest.TestCase):
     """The helper must resolve the same data directory as the C plugin."""
 
+    def test_state_file_override_matches_plugin(self):
+        with mock.patch.dict(os.environ, {'CODEX_TZ_STATE_FILE': '/tmp/native.state',
+                                         'CODEX_TZ_STATE': '/tmp/legacy.state'}):
+            self.assertEqual(helper.state_path(), pathlib.Path('/tmp/native.state'))
+
     def test_data_dir_env_override(self):
         with tempfile.TemporaryDirectory() as path:
             with mock.patch.dict(os.environ, {'CODEX_TZ_DATA_DIR': path}):

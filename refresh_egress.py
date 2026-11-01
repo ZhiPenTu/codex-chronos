@@ -60,7 +60,7 @@ def data_dir():
 
 
 def state_path():
-    override = os.environ.get('CODEX_TZ_STATE')
+    override = os.environ.get('CODEX_TZ_STATE_FILE') or os.environ.get('CODEX_TZ_STATE')
     if override:
         return pathlib.Path(override)
     return data_dir() / 'codex-chronos.state'
@@ -296,10 +296,13 @@ if __name__ == '__main__':
     try:
         if sys.argv[1:] == ['--serve']:
             serve()
+        elif len(sys.argv) == 3 and sys.argv[1] == '--state-file':
+            STATE = pathlib.Path(sys.argv[2])
+            refresh()
         elif not sys.argv[1:]:
             refresh()
         else:
-            raise ValueError('usage: refresh_egress.py [--serve]')
+            raise ValueError('usage: refresh_egress.py [--serve | --state-file PATH]')
     except KeyboardInterrupt:
         # Ctrl-C: serve()'s finally block already removed the socket.
         sys.exit(130)

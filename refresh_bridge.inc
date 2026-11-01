@@ -42,7 +42,7 @@ static void windows_on_demand_refresh(cliproxy_buffer *out,const char *path) {
     tz_json_escape(dir_escaped,sizeof(dir_escaped),tz_data_dir());
     char reason[CODEX_TZ_PATH_CAP*4];
     snprintf(reason,sizeof(reason),
-      "{\"ok\":false,\"reason\":\"出口检测失败：未找到刷新助手 refresh_egress.py（已搜索 CODEX_TZ_HELPER、数据目录与插件目录）。请将其放入数据目录 %s，或用 CODEX_TZ_HELPER 指定路径；也可运行 refresh_egress.py --serve\"}",
+      "{\"ok\":false,\"reason\":\"出口检测失败：无法启动刷新助手 refresh_egress.py。请确认已安装 Python 3.9+（可用 CODEX_TZ_PYTHON 指定），且数据目录 %s 可写；运行日志见 helper.log\"}",
       dir_escaped);
     http_response(out,503,"application/json",reason);
     return;
@@ -177,7 +177,7 @@ static void handle_probe_egress(cliproxy_buffer *out) {
       log_escaped);
   } else {
     snprintf(reason,sizeof(reason),
-      "{\"ok\":false,\"reason\":\"出口检测失败：未找到刷新助手 refresh_egress.py（已搜索 CODEX_TZ_HELPER、数据目录与常见安装位置）。请将其放入数据目录 %s，或用 CODEX_TZ_HELPER 指定路径\"}",
+      "{\"ok\":false,\"reason\":\"出口检测失败：无法启动刷新助手 refresh_egress.py。请确认已安装 Python 3.9+（可用 CODEX_TZ_PYTHON 指定），且数据目录 %s 可写；运行日志见 helper.log\"}",
       dir_escaped);
   }
   http_response(out,503,"application/json",reason);
